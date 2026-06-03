@@ -414,6 +414,16 @@ add(id="q_conv_002", difficulty="L4", type="mcq", module="backend/src/conversati
     answer={"options":["メモリより高速","再起動後も履歴が残り複数uvicorn worker間で安全","Redis廃止","暗号化"],"correct_index":1},
     explanation="WALのsqlite3で永続化＆マルチワーカー安全。Memoryは揮発・単一プロセス向け。")
 
+# ---- p2_drafts staging intake ----
+import glob as _glob
+_DRAFT_DIR = _ROOT / "_ai_workspace" / "p2_drafts"
+for _fp in sorted(_glob.glob(str(_DRAFT_DIR / "batch_*.json"))):
+    with open(_fp, encoding="utf-8") as _f:
+        for q in json.load(_f).get("questions", []):
+            Q.append(q)
+_ids = [q["id"] for q in Q]
+assert len(_ids) == len(set(_ids)), f"duplicate ids: {[i for i in _ids if _ids.count(i) > 1]}"
+
 
 def _get_axis_commit() -> str:
     try:

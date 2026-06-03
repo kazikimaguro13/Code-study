@@ -1873,6 +1873,1282 @@
         "correct_index": 1
       },
       "explanation": "WALのsqlite3で永続化＆マルチワーカー安全。Memoryは揮発・単一プロセス向け。"
+    },
+    {
+      "id": "q_fb_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/feedback.py",
+      "tags": [
+        "feedback",
+        "active-learning"
+      ],
+      "prompt": "feedback.py が記録しているものは？",
+      "citation": {
+        "file": "backend/src/feedback.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "Tracks 👍/👎 signals",
+        "adr_ref": "ADR-028",
+        "snippet": "User feedback storage for active learning (spec_047). Tracks 👍/👎 signals on search results / chat answers, plus the originating query, doc_id, session_id, and timestamp."
+      },
+      "answer": {
+        "options": [
+          "検索のレイテンシ",
+          "回答/検索結果への 👍/👎 と元クエリ・doc_id・session_id・時刻",
+          "LLMのトークン使用量",
+          "ユーザーのログイン履歴"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "active learning 用に 👍/👎 シグナルと文脈（query/doc_id/session_id/timestamp）を記録。集計は evaluation/feedback_report.py。"
+    },
+    {
+      "id": "q_fb_002",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "backend/src/feedback.py",
+      "tags": [
+        "feedback",
+        "design"
+      ],
+      "prompt": "FeedbackStore を Protocol にしている設計意図は？",
+      "citation": {
+        "file": "backend/src/feedback.py",
+        "symbol": {
+          "kind": "class",
+          "name": "FeedbackStore"
+        },
+        "evidence_substring": "without breaking call sites",
+        "adr_ref": "ADR-028",
+        "snippet": "Keeping the store behind a small FeedbackStore Protocol leaves room for a PostgreSQL / Redis backend later without breaking call sites.",
+        "source": "class FeedbackStore(Protocol):\n    def record(\n        self,\n        *,\n        query: str | None,\n        doc_id: str | None,\n        rating: int,\n        session_id: str | None = None,\n        note: str | None = None,\n    ) -> str: ...\n\n    def list_recent(\n        self, *, days: int = 7, limit: int = 1000\n    ) -> list[FeedbackRecord]: ...\n\n    def count(self) -> int: ...\n\n    def close(self) -> None: ...",
+        "start_line": 37,
+        "end_line": 54
+      },
+      "answer": {
+        "options": [
+          "テストを速くするため",
+          "後で PostgreSQL/Redis バックエンドに差し替えても呼び出し側を壊さないため",
+          "型チェックを無効化するため",
+          "sqlite を禁止するため"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "Protocol で実装を抽象化＝将来のバックエンド差し替えに対して呼び出し側非破壊。MVPは logging のみ（自動重み調整は v0.10）。"
+    },
+    {
+      "id": "q_fb_003",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "backend/src/feedback.py",
+      "tags": [
+        "feedback"
+      ],
+      "prompt": "フィードバックを sqlite に永続化する実装クラスはどれ？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/feedback.py",
+        "symbol": {
+          "kind": "class",
+          "name": "SqliteFeedbackStore"
+        },
+        "evidence_substring": "class SqliteFeedbackStore",
+        "adr_ref": null,
+        "snippet": "class SqliteFeedbackStore:\n    def __init__(self, db_path: str = \"~/.axis_feedback.db\") -> None: ...",
+        "source": "class SqliteFeedbackStore:\n    \"\"\"File-backed feedback store using stdlib ``sqlite3`` (no new deps).\n\n    The default path is ``~/.axis_feedback.db`` so the file lives next to\n    the existing ``~/.axis_chat.db`` from spec_036. A single shared\n    connection is reused under a ``threading.Lock`` because FastAPI may\n    call ``record`` from multiple worker threads.\n    \"\"\"\n\n    SCHEMA = \"\"\"\n    CREATE TABLE IF NOT EXISTS feedback (\n        feedback_id TEXT PRIMARY KEY,\n        query TEXT,\n        doc_id TEXT,\n        rating INTEGER NOT NULL,\n        session_id TEXT,\n        note TEXT,\n        timestamp REAL NOT NULL\n    );\n    CREATE INDEX IF NOT EXISTS idx_feedback_ts ON feedback(timestamp);\n    CREATE INDEX IF NOT EXISTS idx_feedback_doc ON feedback(doc_id);\n    \"\"\"\n\n    def __init__(self, db_path: str = \"~/.axis_feedback.db\") -> None:\n        self._db_path = Path(os.path.expanduser(db_path))\n        self._db_path.parent.mkdir(parents=True, exist_ok=True)\n        self._conn: sqlite3.Connection | None = sqlite3.connect(\n            str(self._db_path), check_same_thread=False\n        )\n        self._conn.executescript(self.SCHEMA)\n        self._conn.execute(\"PRAGMA journal_mode=WAL\")\n        self._conn.commit()\n        self._lock = threading.Lock()\n\n    def record(\n        self,\n        *,\n        query: str | None = None,\n        doc_id: str | None = None,\n        rating: int,\n        session_id: str | None = None,\n        note: str | None = None,\n    ) -> str:\n        if self._conn is None:\n            raise RuntimeError(\"feedback store has been closed\")\n        fid = str(uuid.uuid4())\n        ts = datetime.now(UTC).timestamp()\n        with self._lock:\n            self._conn.execute(\n                \"INSERT INTO feedback \"\n                \"(feedback_id, query, doc_id, rating, session_id, note, timestamp) \"\n                \"VALUES (?, ?, ?, ?, ?, ?, ?)\",\n                (fid, query, doc_id, int(rating), session_id, note, ts),\n            )\n            self._conn.commit()\n        return fid\n\n    def list_recent(\n        self, *, days: int = 7, limit: int = 1000\n    ) -> list[FeedbackRecord]:\n        if self._conn is None:\n            raise RuntimeError(\"feedback store has been closed\")\n        cutoff = datetime.now(UTC).timestamp() - days * 86400\n        rows = self._conn.execute(\n            \"SELECT feedback_id, query, doc_id, rating, session_id, note, timestamp \"\n            \"FROM feedback WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?\",\n            (cutoff, limit),\n        ).fetchall()\n        return [\n            FeedbackRecord(\n                feedback_id=r[0],\n                query=r[1],\n                doc_id=r[2],\n                rating=int(r[3]),\n                session_id=r[4],\n                note=r[5],\n                timestamp=datetime.fromtimestamp(r[6], tz=UTC),\n            )\n            for r in rows\n        ]\n\n    def count(self) -> int:\n        if self._conn is None:\n            return 0\n        return int(\n            self._conn.execute(\"SELECT COUNT(*) FROM feedback\").fetchone()[0]\n        )\n\n    def close(self) -> None:\n        if self._conn is not None:\n            self._conn.close()\n            self._conn = None",
+        "start_line": 57,
+        "end_line": 148
+      },
+      "answer": {
+        "file": "backend/src/feedback.py",
+        "symbol": "SqliteFeedbackStore"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "SqliteFeedbackStore"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "SqliteFeedbackStore が FeedbackStore Protocol の sqlite 実装。make_feedback_store がconfigで生成。"
+    },
+    {
+      "id": "q_gap_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/gap_detection.py",
+      "tags": [
+        "gap-detection"
+      ],
+      "prompt": "gap_detection が記録するナレッジギャップの3種類は？",
+      "citation": {
+        "file": "backend/src/gap_detection.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "llm_no_info",
+        "adr_ref": "ADR-029",
+        "snippet": "no_results — search returned an empty hit list.\nlow_score — top hit fell below gap.low_score_threshold.\nllm_no_info — the LLM answered 資料に記載がありません or similar."
+      },
+      "answer": {
+        "options": [
+          "error / warning / info",
+          "no_results / low_score / llm_no_info",
+          "timeout / empty / slow",
+          "404 / 500 / 503"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "無結果 / 上位スコア低 / LLMが情報なしと回答、の3イベントを記録。集計は evaluation/gap_report.py。"
+    },
+    {
+      "id": "q_gap_002",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "backend/src/gap_detection.py",
+      "tags": [
+        "gap-detection"
+      ],
+      "prompt": "回答文が「資料に記載がありません」等の情報なし応答かを判定する関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/gap_detection.py",
+        "symbol": {
+          "kind": "function",
+          "name": "detect_no_info"
+        },
+        "evidence_substring": "def detect_no_info",
+        "adr_ref": null,
+        "snippet": "def detect_no_info(answer_text: str | None) -> bool:\n    # True if the LLM said 資料に記載がありません or similar",
+        "source": "def detect_no_info(answer_text: str | None) -> bool:\n    \"\"\"Return ``True`` when the LLM seems to have answered \"I don't know\".\n\n    Empty / whitespace-only answers are treated as a gap as well — an\n    empty model response is equivalent to \"no information\" for the\n    purpose of populating the knowledge-gap report.\n    \"\"\"\n    if not answer_text or not answer_text.strip():\n        return True\n    return bool(_NO_INFO_RE.search(answer_text))",
+        "start_line": 192,
+        "end_line": 201
+      },
+      "answer": {
+        "file": "backend/src/gap_detection.py",
+        "symbol": "detect_no_info"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "detect_no_info"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "detect_no_info が llm_no_info ギャップの判定に使われる。"
+    },
+    {
+      "id": "q_marker_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/marker.py",
+      "tags": [
+        "marker"
+      ],
+      "prompt": "AUTO_GENERATED マーカーブロックの役割は？",
+      "citation": {
+        "file": "backend/src/marker.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "preserving everything else",
+        "adr_ref": null,
+        "snippet": "Allows human-written Markdown and AI-generated sections to coexist. Regenerating a block overwrites only the content between its delimiters, preserving everything else (= the human-written part)."
+      },
+      "answer": {
+        "options": [
+          "全文をAIで上書きする",
+          "人間が書いた部分とAI生成部分を共存させ、再生成は区切り間だけ上書きする",
+          "Markdownを禁止する",
+          "コメントを全削除する"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "人手とAI生成を1ファイルで共存。区切り（START/END）間だけ差し替え、人間の記述は保全。"
+    },
+    {
+      "id": "q_marker_002",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "backend/src/marker.py",
+      "tags": [
+        "marker"
+      ],
+      "prompt": "指定ブロックの中身だけを上書きする関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/marker.py",
+        "symbol": {
+          "kind": "function",
+          "name": "update_block"
+        },
+        "evidence_substring": "def update_block",
+        "adr_ref": null,
+        "snippet": "def update_block(text: str, name: str, new_content: str) -> str:\n    # overwrite only the content between this block's delimiters",
+        "source": "def update_block(text: str, name: str, new_content: str) -> str:\n    \"\"\"Replace an existing block's content. If absent, append at the end.\"\"\"\n    if not re.match(rf\"^{NAME_PATTERN}$\", name):\n        raise MarkerError(f\"Invalid marker name: {name!r}\")\n\n    new_content = new_content.rstrip(\"\\n\")\n    replacement = (\n        f\"<!-- AUTO_GENERATED_START: {name} -->\\n\"\n        f\"{new_content}\\n\"\n        f\"<!-- AUTO_GENERATED_END: {name} -->\"\n    )\n\n    block_re = re.compile(\n        r\"<!--\\s*AUTO_GENERATED_START:\\s*\" + re.escape(name) + r\"\\s*-->\\n\"\n        r\".*?\"\n        r\"\\n<!--\\s*AUTO_GENERATED_END:\\s*\" + re.escape(name) + r\"\\s*-->\",\n        re.DOTALL,\n    )\n    if block_re.search(text):\n        return block_re.sub(replacement, text, count=1)\n\n    # Append at end (with leading newline if needed)\n    sep = \"\" if text.endswith(\"\\n\\n\") else (\"\\n\" if text.endswith(\"\\n\") else \"\\n\\n\")\n    return text + sep + replacement + \"\\n\"",
+        "start_line": 71,
+        "end_line": 94
+      },
+      "answer": {
+        "file": "backend/src/marker.py",
+        "symbol": "update_block"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "update_block",
+          "extract_blocks"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "update_block が区切り間のみ置換。extract_blocks/validate_balance/strip_blocks も同モジュール。"
+    },
+    {
+      "id": "q_marker_003",
+      "difficulty": "L2",
+      "type": "fill_blank",
+      "module": "backend/src/marker.py",
+      "tags": [
+        "marker"
+      ],
+      "prompt": "ブロック開始の区切りコメントの形式の空欄を埋めよ:\n    <!-- ____: <name> -->",
+      "citation": {
+        "file": "backend/src/marker.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "AUTO_GENERATED_START",
+        "adr_ref": null,
+        "snippet": "Blocks are delimited by:\n    <!-- AUTO_GENERATED_START: <name> -->\n    ...\n    <!-- AUTO_GENERATED_END: <name> -->"
+      },
+      "answer": {
+        "accepted": [
+          "AUTO_GENERATED_START"
+        ]
+      },
+      "grading": {
+        "casefold": true
+      },
+      "explanation": "開始 AUTO_GENERATED_START / 終了 AUTO_GENERATED_END で name 付きブロックを画定。"
+    },
+    {
+      "id": "q_ps_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/parent_storage.py",
+      "tags": [
+        "parent-doc",
+        "storage"
+      ],
+      "prompt": "ParentStorage の2実装は？",
+      "citation": {
+        "file": "backend/src/parent_storage.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "JsonParentStorage",
+        "adr_ref": "ADR-023",
+        "snippet": "Two implementations:\n- SqliteParentStorage (v0.8 default): file-backed sqlite, lazy SELECT per parent_id\n- JsonParentStorage (v0.7 fallback): full-JSON load at init."
+      },
+      "answer": {
+        "options": [
+          "Redis / Memcached",
+          "SqliteParentStorage（既定） / JsonParentStorage（後方互換）",
+          "Chroma / FAISS",
+          "Postgres / MySQL"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "v0.8 既定は sqlite（parent_id 単位の遅延SELECT）、v0.7 互換の JSON 全ロードも残す。"
+    },
+    {
+      "id": "q_ps_002",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "backend/src/parent_storage.py",
+      "tags": [
+        "parent-doc",
+        "design"
+      ],
+      "prompt": "parent 保存を JSON 全ロードから sqlite の遅延SELECTへ移行した利点は？",
+      "citation": {
+        "file": "backend/src/parent_storage.py",
+        "symbol": {
+          "kind": "class",
+          "name": "SqliteParentStorage"
+        },
+        "evidence_substring": "lazy SELECT per parent_id",
+        "adr_ref": "ADR-023",
+        "snippet": "SqliteParentStorage (v0.8 default): file-backed sqlite, lazy SELECT per parent_id. JsonParentStorage (v0.7 fallback): full-JSON load at init.",
+        "source": "class SqliteParentStorage:\n    \"\"\"SQLite-backed parent storage with lazy SELECT per parent_id.\n\n    Schema:\n        parents(parent_id TEXT PK, doc_id TEXT, title TEXT, text TEXT, metadata_json TEXT)\n        INDEX idx_parents_doc_id ON parents(doc_id)\n    \"\"\"\n\n    SCHEMA = \"\"\"\n    CREATE TABLE IF NOT EXISTS parents (\n        parent_id TEXT PRIMARY KEY,\n        doc_id TEXT NOT NULL,\n        title TEXT NOT NULL,\n        text TEXT NOT NULL,\n        metadata_json TEXT\n    );\n    CREATE INDEX IF NOT EXISTS idx_parents_doc_id ON parents(doc_id);\n    \"\"\"\n\n    # SQLite's default SQLITE_LIMIT_VARIABLE_NUMBER is 999 on builds <3.32 and\n    # 32766 on newer builds — but we target the conservative limit so 1000+ doc\n    # corpora work everywhere (spec_042 MID #2).\n    SQLITE_VARIABLE_LIMIT = 999\n\n    def __init__(self, db_path: str | Path) -> None:\n        self._db_path = Path(db_path) if str(db_path) != \":memory:\" else Path(\":memory:\")\n        if str(db_path) != \":memory:\":\n            self._db_path = Path(db_path)\n            self._db_path.parent.mkdir(parents=True, exist_ok=True)\n        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)\n        self._conn.executescript(self.SCHEMA)\n        self._conn.execute(\"PRAGMA journal_mode=WAL\")\n        self._conn.commit()\n\n    def get(self, parent_id: str) -> ParentChunk | None:\n        row = self._conn.execute(\n            \"SELECT parent_id, doc_id, title, text, metadata_json FROM parents WHERE parent_id = ?\",\n            (parent_id,),\n        ).fetchone()\n        return self._row_to_parent(row) if row else None\n\n    def get_many(self, parent_ids: list[str]) -> list[ParentChunk]:\n        \"\"\"Fetch multiple parents in one or more queries.\n\n        Chunked at ``SQLITE_VARIABLE_LIMIT`` (999) so 1000+ docs don't trip\n        SQLite's bind-variable cap (spec_042 MID #2). Input order is preserved\n        and missing ids are silently dropped — same contract as the original\n        single-query implementation.\n        \"\"\"\n        if not parent_ids:\n            return []\n        by_id: dict[str, tuple] = {}\n        for i in range(0, len(parent_ids), self.SQLITE_VARIABLE_LIMIT):\n            chunk = parent_ids[i : i + self.SQLITE_VARIABLE_LIMIT]\n            placeholders = \",\".join(\"?\" * len(chunk))\n            rows = self._conn.execute(\n                f\"SELECT parent_id, doc_id, title, text, metadata_json FROM parents \"\n                f\"WHERE parent_id IN ({placeholders})\",\n                chunk,\n            ).fetchall()\n            for r in rows:\n                by_id[r[0]] = r\n        return [self._row_to_parent(by_id[pid]) for pid in parent_ids if pid in by_id]\n\n    def upsert_many(self, parents: list[ParentChunk]) -> int:\n        if not parents:\n            return 0\n        rows = [\n            (\n                p.parent_id,\n                p.doc_id,\n                p.title,\n                p.text,\n                json.dumps(p.metadata, ensure_ascii=False) if p.metadata else None,\n            )\n            for p in parents\n        ]\n        self._conn.executemany(\n            \"INSERT OR REPLACE INTO parents (parent_id, doc_id, title, text, metadata_json) \"\n            \"VALUES (?, ?, ?, ?, ?)\",\n            rows,\n        )\n        self._conn.commit()\n        return len(rows)\n\n    def has(self, parent_id: str) -> bool:\n        row = self._conn.execute(\n            \"SELECT 1 FROM parents WHERE parent_id = ?\", (parent_id,)\n        ).fetchone()\n        return row is not None\n\n    def count(self) -> int:\n        return self._conn.execute(\"SELECT COUNT(*) FROM parents\").fetchone()[0]\n\n    def clear(self) -> None:\n        self._conn.execute(\"DELETE FROM parents\")\n        self._conn.commit()\n\n    def close(self) -> None:\n        if self._conn:\n            self._conn.close()\n            self._conn = None  # type: ignore[assignment]\n\n    def list_all(self) -> list[ParentChunk]:\n        \"\"\"Return all stored parents. Not part of the Protocol; used by VectorStore.load_parents().\"\"\"\n        rows = self._conn.execute(\n            \"SELECT parent_id, doc_id, title, text, metadata_json FROM parents\"\n        ).fetchall()\n        return [self._row_to_parent(r) for r in rows]\n\n    def _row_to_parent(self, row: tuple) -> ParentChunk:\n        parent_id, doc_id, title, text, metadata_json = row\n        metadata = json.loads(metadata_json) if metadata_json else {}\n        return ParentChunk(\n            parent_id=parent_id,\n            doc_id=doc_id,\n            title=title,\n            text=text,\n            metadata=metadata,\n        )",
+        "start_line": 34,
+        "end_line": 153
+      },
+      "answer": {
+        "options": [
+          "JSONの方が速い",
+          "起動時に全parentをメモリ展開せず、必要なparent_idだけ都度SELECTできる",
+          "暗号化のため",
+          "Chroma必須のため"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "全ロード（起動コスト・メモリ）を避け、検索ヒットしたparentだけ遅延取得。spec_037の進化。"
+    },
+    {
+      "id": "q_rev_001",
+      "difficulty": "L2",
+      "type": "freetext",
+      "module": "backend/src/gap_detection.py",
+      "tags": [
+        "reverse",
+        "gap-detection"
+      ],
+      "prompt": "次のコードの役割を一文で説明せよ:\n\n    def detect_no_info(answer_text: str | None) -> bool:\n        # returns True when the LLM answer indicates it has no info\n        # e.g. '資料に記載がありません'",
+      "citation": {
+        "file": "backend/src/gap_detection.py",
+        "symbol": {
+          "kind": "function",
+          "name": "detect_no_info"
+        },
+        "evidence_substring": "no info",
+        "adr_ref": null,
+        "snippet": "def detect_no_info(answer_text): # returns True when the LLM answer indicates it has no info (資料に記載がありません 等)",
+        "source": "def detect_no_info(answer_text: str | None) -> bool:\n    \"\"\"Return ``True`` when the LLM seems to have answered \"I don't know\".\n\n    Empty / whitespace-only answers are treated as a gap as well — an\n    empty model response is equivalent to \"no information\" for the\n    purpose of populating the knowledge-gap report.\n    \"\"\"\n    if not answer_text or not answer_text.strip():\n        return True\n    return bool(_NO_INFO_RE.search(answer_text))",
+        "start_line": 192,
+        "end_line": 201
+      },
+      "answer": {
+        "model_answer": "LLMの回答が『情報がない/資料に記載がない』旨かを判定し、llm_no_info ギャップ検出に使う関数。",
+        "required_keywords": [
+          {
+            "any_of": [
+              "llm",
+              "回答",
+              "answer",
+              "応答"
+            ]
+          },
+          {
+            "any_of": [
+              "情報がない",
+              "記載がない",
+              "no info",
+              "情報なし",
+              "資料"
+            ]
+          },
+          {
+            "any_of": [
+              "判定",
+              "検出",
+              "true",
+              "ギャップ",
+              "gap"
+            ]
+          }
+        ],
+        "forbidden_keywords": []
+      },
+      "grading": {
+        "min_keyword_coverage": 0.66
+      },
+      "explanation": "逆向き問題：コードを見て役割を言語化。これが llm_no_info ギャップ判定の核。"
+    },
+    {
+      "id": "q_rev_002",
+      "difficulty": "L2",
+      "type": "freetext",
+      "module": "backend/src/marker.py",
+      "tags": [
+        "reverse",
+        "marker"
+      ],
+      "prompt": "次の関数の役割を一文で説明せよ:\n\n    def update_block(text, name, new_content):\n        # find <!-- AUTO_GENERATED_START: name --> .. END\n        # replace only the inside, keep the rest",
+      "citation": {
+        "file": "backend/src/marker.py",
+        "symbol": {
+          "kind": "function",
+          "name": "update_block"
+        },
+        "evidence_substring": "replace only the inside",
+        "adr_ref": null,
+        "snippet": "def update_block(text, name, new_content): # find AUTO_GENERATED_START:name .. END, replace only the inside, keep the rest",
+        "source": "def update_block(text: str, name: str, new_content: str) -> str:\n    \"\"\"Replace an existing block's content. If absent, append at the end.\"\"\"\n    if not re.match(rf\"^{NAME_PATTERN}$\", name):\n        raise MarkerError(f\"Invalid marker name: {name!r}\")\n\n    new_content = new_content.rstrip(\"\\n\")\n    replacement = (\n        f\"<!-- AUTO_GENERATED_START: {name} -->\\n\"\n        f\"{new_content}\\n\"\n        f\"<!-- AUTO_GENERATED_END: {name} -->\"\n    )\n\n    block_re = re.compile(\n        r\"<!--\\s*AUTO_GENERATED_START:\\s*\" + re.escape(name) + r\"\\s*-->\\n\"\n        r\".*?\"\n        r\"\\n<!--\\s*AUTO_GENERATED_END:\\s*\" + re.escape(name) + r\"\\s*-->\",\n        re.DOTALL,\n    )\n    if block_re.search(text):\n        return block_re.sub(replacement, text, count=1)\n\n    # Append at end (with leading newline if needed)\n    sep = \"\" if text.endswith(\"\\n\\n\") else (\"\\n\" if text.endswith(\"\\n\") else \"\\n\\n\")\n    return text + sep + replacement + \"\\n\"",
+        "start_line": 71,
+        "end_line": 94
+      },
+      "answer": {
+        "model_answer": "指定名のAUTO_GENERATEDブロックの区切り間だけを new_content で置換し、他（人間記述）は保持する関数。",
+        "required_keywords": [
+          {
+            "any_of": [
+              "ブロック",
+              "block",
+              "区切り",
+              "delimiter",
+              "auto_generated"
+            ]
+          },
+          {
+            "any_of": [
+              "置換",
+              "上書き",
+              "replace",
+              "差し替え"
+            ]
+          },
+          {
+            "any_of": [
+              "他",
+              "残り",
+              "保持",
+              "preserve",
+              "keep",
+              "人間"
+            ]
+          }
+        ],
+        "forbidden_keywords": []
+      },
+      "grading": {
+        "min_keyword_coverage": 0.66
+      },
+      "explanation": "逆向き問題：区切り間だけ置換・他保全という marker の中核挙動を言語化させる。"
+    },
+    {
+      "id": "q_api_001",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "backend/src/api.py",
+      "tags": [
+        "api",
+        "live-ingest"
+      ],
+      "prompt": "メモを受け取り live ingest を起動する HTTP エンドポイント関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/api.py",
+        "symbol": {
+          "kind": "function",
+          "name": "post_ingest_memo"
+        },
+        "evidence_substring": "async def post_ingest_memo",
+        "adr_ref": null,
+        "snippet": "@app.post(\"/api/ingest/memo\", response_model=MemoIngestResponse)\nasync def post_ingest_memo(req: MemoIngestRequest, ...): ...",
+        "source": "async def post_ingest_memo(\n    req: MemoIngestRequest,\n    x_axis_token: str | None = Header(default=None, alias=\"X-Axis-Token\"),\n) -> MemoIngestResponse:\n    \"\"\"Live ingest one memo. Same X-Axis-Token gate as /api/ingest.\n\n    Two modes:\n      * ``markdown``: full YAML+md text; written to ``<knowledge_dir>/<id>.md``\n        (overwrites if it exists — re-ingest is upsert).\n      * ``path``: relative or absolute path under ``knowledge_dir`` of an\n        already-saved file.\n\n    Either way, the file is loaded, chunked, embedded and merged into the\n    running ChromaDB collection — and the KnowledgeGraph is rebuilt — so\n    ``POST /api/search`` and ``GET /api/graph`` show the new memo\n    immediately, with no ``build_index --rebuild`` and no backend restart.\n    \"\"\"\n    _require_ingest_token(x_axis_token)\n    if not req.markdown and not req.path:\n        raise HTTPException(\n            status_code=400, detail=\"one of 'markdown' or 'path' is required\"\n        )\n\n    knowledge_dir = Path(_state.get(\"knowledge_dir\", \"./examples/knowledge\"))\n    target = _resolve_memo_path(req, knowledge_dir)\n    try:\n        result = _live_ingest_path(target)\n    except HTTPException:\n        raise\n    except Exception as e:  # noqa: BLE001\n        raise HTTPException(status_code=500, detail=f\"ingest failed: {e}\") from e\n    _rebuild_graph_state()\n    return MemoIngestResponse(\n        doc_id=result.doc_id,\n        saved_path=str(target),\n        parents=result.parents,\n        children=result.children,\n        deleted_existing=result.deleted_existing,\n        indexed=True,\n    )",
+        "start_line": 444,
+        "end_line": 483
+      },
+      "answer": {
+        "file": "backend/src/api.py",
+        "symbol": "post_ingest_memo"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "post_ingest_memo"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "POST /api/ingest/memo のハンドラ。MCP の axis_ingest_memo もこの経路に繋がる（spec_056）。"
+    },
+    {
+      "id": "q_api_002",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/api.py",
+      "tags": [
+        "api",
+        "startup"
+      ],
+      "prompt": "FastAPI 起動時に1度だけグラフ・検索エンジン・各ストアを構築する仕組みは？",
+      "citation": {
+        "file": "backend/src/api.py",
+        "symbol": {
+          "kind": "function",
+          "name": "lifespan"
+        },
+        "evidence_substring": "async def lifespan",
+        "adr_ref": null,
+        "snippet": "@asynccontextmanager\nasync def lifespan(app: FastAPI) -> AsyncIterator[None]:\n    # build graph / engine / stores once at startup, dispose at shutdown",
+        "source": "async def lifespan(app: FastAPI) -> AsyncIterator[None]:\n    configure_logging()\n    logger.info(\"Initializing axis-knowledge-rag API...\")\n    store = VectorStore(path=settings.chroma_db_path)\n    app_cfg = load_app_config()\n    embedder = make_embedder(app_cfg.embedder)\n    normalizer = Normalizer.from_config(load_axes_config())\n    # spec_051 HIGH-1: detect embedder ↔ index dim mismatch at startup.\n    # Empty store (probe returns None) skips silently — first ingest will\n    # set the dim. A mismatch is fatal because every subsequent query\n    # would crash inside Chroma with an opaque shape error.\n    try:\n        store_dim = store.probe_dim()\n    except Exception as e:  # noqa: BLE001\n        logger.warning(\"dim verification skipped: %s\", e)\n        store_dim = None\n    if store_dim is not None and store_dim != embedder.dim:\n        raise RuntimeError(\n            f\"Embedding dim mismatch: chroma store has dim={store_dim}, \"\n            f\"embedder ({type(embedder).__name__}) reports dim={embedder.dim}. \"\n            f\"config.yml で embedder.backend を変更した場合は \"\n            f\"`PYTHONPATH=. python3 -m scripts.build_index examples/knowledge --rebuild` \"\n            f\"を実行して index を rebuild してください。\"\n        )\n    pd = app_cfg.retrieval.parent_doc\n    if pd.enabled and not store.has_parents():\n        logger.warning(\n            \"parent_doc.enabled=true but parents.json is missing — falling back \"\n            \"to legacy file-level search. Run scripts/build_index.py --rebuild \"\n            \"--mode parent_doc to populate it.\"\n        )\n        parent_doc_enabled = False\n    else:\n        parent_doc_enabled = pd.enabled\n    graph: KnowledgeGraph | None = None\n    if app_cfg.graph.enabled:\n        # spec_042 LOW #5: building the graph walks the knowledge dir + parses\n        # frontmatter, which can stall lifespan for seconds on 1000+ doc\n        # corpora. Run it on the default executor so the event loop stays\n        # responsive (e.g. for liveness probes).\n        loop = asyncio.get_running_loop()\n        try:\n            graph = await loop.run_in_executor(\n                None, build_default_graph, app_cfg.graph.knowledge_dir\n            )\n            logger.info(\"knowledge graph stats: %s\", graph.stats())\n        except Exception as e:  # noqa: BLE001\n            logger.warning(\"failed to build knowledge graph: %s — disabling /api/graph\", e)\n            graph = None\n    # spec_048: build the gap store first so both the search engine\n    # (no_results / low_score) and the RAG pipeline (llm_no_info) can\n    # share the same backing SQLite. Disabled config → both hooks become\n    # no-ops without any further conditionals at the call sites.\n    gap_store = make_gap_store(app_cfg.gap)\n    if gap_store is not None:\n        logger.info(\"gap store: %s\", type(gap_store).__name__)\n    else:\n        logger.info(\"gap store: disabled (gap.enabled=false)\")\n    engine = SearchEngine(\n        store,\n        embedder,\n        normalizer,\n        parent_doc_enabled=parent_doc_enabled,\n        top_k_children=pd.top_k_children,\n        graph=graph,\n        gap_store=gap_store,\n        gap_low_score_threshold=app_cfg.gap.low_score_threshold,\n    )\n    rag = RAGPipeline(\n        engine,\n        context_max_chars=app_cfg.rag.context_max_chars,\n        backend=make_generation_backend(app_cfg.generation),\n        gap_store=gap_store,\n    )\n    chat_store = make_conversation_store(app_cfg.chat)\n    configure_default_store(chat_store)\n    logger.info(\n        \"chat store: %s (backend=%s)\",\n        type(chat_store).__name__,\n        app_cfg.chat.storage.backend,\n    )\n    feedback_store = make_feedback_store(app_cfg.feedback)\n    if feedback_store is not None:\n        logger.info(\"feedback store: %s\", type(feedback_store).__name__)\n    else:\n        logger.info(\"feedback store: disabled (feedback.enabled=false)\")\n    _state[\"engine\"] = engine\n    _state[\"rag\"] = rag\n    _state[\"embedder\"] = embedder\n    # spec_056: keep the live VectorStore + Normalizer so /api/ingest/memo can\n    # add chunks against the same collection the engine is querying — drop+\n    # recreate would invalidate the engine's collection handle.\n    _state[\"store\"] = store\n    _state[\"normalizer\"] = normalizer\n    _state[\"retrieval_cfg\"] = app_cfg.retrieval\n    _state[\"axes_cfg\"] = load_axes_config()\n    _state[\"chat_store\"] = chat_store\n    _state[\"chat_cfg\"] = app_cfg.chat\n    _state[\"graph\"] = graph\n    _state[\"graph_cfg\"] = app_cfg.graph\n    _state[\"knowledge_dir\"] = app_cfg.graph.knowledge_dir\n    _state[\"feedback_store\"] = feedback_store\n    _state[\"feedback_cfg\"] = app_cfg.feedback\n    _state[\"gap_store\"] = gap_store\n    _state[\"gap_cfg\"] = app_cfg.gap\n    try:\n        yield\n    finally:\n        try:\n            chat_store.close()\n        except Exception:  # noqa: BLE001\n            logger.warning(\"chat store close failed\", exc_info=True)\n        if feedback_store is not None:\n            try:\n                feedback_store.close()\n            except Exception:  # noqa: BLE001\n                logger.warning(\"feedback store close failed\", exc_info=True)\n        if gap_store is not None:\n            try:\n                gap_store.close()\n            except Exception:  # noqa: BLE001\n                logger.warning(\"gap store close failed\", exc_info=True)\n        _state.clear()",
+        "start_line": 68,
+        "end_line": 190
+      },
+      "answer": {
+        "options": [
+          "各リクエストで毎回構築する",
+          "@asynccontextmanager の lifespan で起動時に1度構築する",
+          "モジュールimport時のグローバルで構築する",
+          "フロントエンドが構築する"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "lifespan（asynccontextmanager）で起動時に重い初期化を1回だけ行い、shutdownで後始末。"
+    },
+    {
+      "id": "q_api_003",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "backend/src/api.py",
+      "tags": [
+        "api",
+        "security"
+      ],
+      "prompt": "ingest トークン（X-Axis-Token）を検証する関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/api.py",
+        "symbol": {
+          "kind": "function",
+          "name": "_require_ingest_token"
+        },
+        "evidence_substring": "def _require_ingest_token",
+        "adr_ref": null,
+        "snippet": "def _require_ingest_token(x_axis_token: str | None) -> None:\n    # compare against AXIS_INGEST_TOKEN env; 401 on mismatch",
+        "source": "def _require_ingest_token(x_axis_token: str | None) -> None:\n    \"\"\"401 when AXIS_INGEST_TOKEN is configured and the header doesn't match.\n\n    Read at call-time (not at import) so tests can monkey-patch\n    ``os.environ`` after the app has been built.\n    \"\"\"\n    expected = (os.environ.get(\"AXIS_INGEST_TOKEN\", \"\") or \"\").strip()\n    if not expected:\n        return\n    if x_axis_token != expected:\n        raise HTTPException(status_code=401, detail=\"invalid or missing X-Axis-Token\")",
+        "start_line": 279,
+        "end_line": 289
+      },
+      "answer": {
+        "file": "backend/src/api.py",
+        "symbol": "_require_ingest_token"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "_require_ingest_token"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "AXIS_INGEST_TOKEN と X-Axis-Token を照合。未設定時は v0.8 互換で無認証許容。"
+    },
+    {
+      "id": "q_api_004",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "README.md",
+      "tags": [
+        "api",
+        "security",
+        "design"
+      ],
+      "prompt": "AXIS_INGEST_TOKEN が未設定のとき、POST /api/ingest の挙動は？",
+      "citation": {
+        "file": "README.md",
+        "symbol": {
+          "kind": "section",
+          "name": "Security note"
+        },
+        "evidence_substring": "v0.8 互換 (無認証許容)",
+        "adr_ref": null,
+        "snippet": "`AXIS_INGEST_TOKEN` が未設定の場合は v0.8 互換 (無認証許容)。127.0.0.1 で動かす限りは問題ないが、LAN越し/外部公開時は必ず設定する。"
+      },
+      "answer": {
+        "options": [
+          "常に401で拒否",
+          "v0.8 互換で無認証許容（ローカル前提、外部公開時は要設定）",
+          "サーバ起動を停止する",
+          "ランダムトークンを自動生成"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "ローカル(127.0.0.1)前提なら無認証でOK。外部公開時のみトークン必須、という段階的セキュリティ設計。"
+    },
+    {
+      "id": "q_api_005",
+      "difficulty": "L3",
+      "type": "dataflow",
+      "module": "backend/src/api.py",
+      "tags": [
+        "api",
+        "pipeline"
+      ],
+      "prompt": "POST /api/search がレスポンスを返すまでの主要ステップを順に並べよ（候補: searchエンドポイント, engine.search, _to_payload, SearchResponse）。",
+      "citation": {
+        "file": "backend/src/api.py",
+        "symbol": {
+          "kind": "function",
+          "name": "search"
+        },
+        "evidence_substring": "_to_payload",
+        "adr_ref": null,
+        "snippet": "async def search(req: SearchRequest) -> SearchResponse:\n    results = engine.search(req.query, filters=req.filters, top_k=req.top_k, ...)\n    return SearchResponse(results=[_to_payload(r) for r in results])",
+        "source": "async def search(req: SearchRequest) -> SearchResponse:\n    engine: SearchEngine = _state[\"engine\"]\n    graph_cfg = _state.get(\"graph_cfg\")\n    # config-level default (expand_on_search) is OR'd with the request flag,\n    # so admins can flip the default without touching callers.\n    do_expand = req.graph_expand or bool(graph_cfg and graph_cfg.expand_on_search)\n    try:\n        results = engine.search(\n            req.query,\n            filters=req.filters or None,\n            top_k=req.top_k,\n            graph_expand=do_expand,\n            graph_hop=req.graph_hop,\n            graph_max_neighbors=req.graph_max_neighbors,\n        )\n    except Exception as e:\n        raise HTTPException(status_code=500, detail=str(e)) from e\n    return SearchResponse(results=[_to_payload(r) for r in results])",
+        "start_line": 487,
+        "end_line": 504
+      },
+      "answer": {
+        "sequence": [
+          "search",
+          "engine.search",
+          "_to_payload",
+          "SearchResponse"
+        ]
+      },
+      "grading": {
+        "mode": "subsequence",
+        "pass_threshold": 0.75,
+        "aliases": [
+          [
+            "search",
+            "エンドポイント",
+            "endpoint"
+          ],
+          [
+            "engine.search",
+            "searchengine",
+            "検索エンジン",
+            "engine"
+          ],
+          [
+            "_to_payload",
+            "payload",
+            "変換"
+          ],
+          [
+            "searchresponse",
+            "response",
+            "レスポンス"
+          ]
+        ]
+      },
+      "pool": [
+        "_to_payload",
+        "SearchResponse",
+        "search",
+        "engine.search"
+      ],
+      "explanation": "エンドポイントが SearchEngine.search を呼び、SearchResult を _to_payload で API 用に変換して SearchResponse に詰める。"
+    },
+    {
+      "id": "q_eval_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "evaluation/judge.py",
+      "tags": [
+        "evaluation",
+        "ragas"
+      ],
+      "prompt": "evaluation/judge.py の役割は？",
+      "citation": {
+        "file": "evaluation/judge.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "ragas LLM judge",
+        "adr_ref": "ADR-019",
+        "snippet": "Gemini 1.5 Flash adapter for ragas LLM judge.\ndef get_judge_llm() -> BaseChatModel: ..."
+      },
+      "answer": {
+        "options": [
+          "検索インデックスを作る",
+          "ragas 評価の LLM judge として Gemini Flash を供給するアダプタ",
+          "フロントの状態管理",
+          "DBマイグレーション"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "RAGAS（RAG品質自動評価）が使う judge LLM/embeddings に Gemini Flash を差し込むアダプタ。"
+    },
+    {
+      "id": "q_eval_002",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "evaluation/stats.py",
+      "tags": [
+        "evaluation",
+        "stats"
+      ],
+      "prompt": "RAGAS スコアの A/B 比較で「対応のある t 検定」を行う関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "evaluation/stats.py",
+        "symbol": {
+          "kind": "function",
+          "name": "paired_t_test"
+        },
+        "evidence_substring": "def paired_t_test",
+        "adr_ref": null,
+        "snippet": "@dataclass(frozen=True)\nclass TTestResult: ...\ndef paired_t_test(scores_a, scores_b): # paired t-test for A/B metric comparison",
+        "source": "def paired_t_test(\n    scores_a: list[float], scores_b: list[float], *, alpha: float = 0.05\n) -> TTestResult | None:\n    \"\"\"Run paired t-test on two RAGAS score arrays for the same metric.\n\n    Returns None if scipy not available (graceful degradation).\n    \"\"\"\n    if len(scores_a) != len(scores_b) or len(scores_a) < 2:\n        raise ValueError(\n            f\"need same-length arrays >= 2, got {len(scores_a)} vs {len(scores_b)}\"\n        )\n    try:\n        from scipy import stats\n    except ImportError:\n        return None\n    result = stats.ttest_rel(scores_b, scores_a)\n    diff = sum(scores_b) / len(scores_b) - sum(scores_a) / len(scores_a)\n    direction = \"tie\"\n    if result.pvalue < alpha:\n        direction = \"B>A\" if diff > 0 else \"A>B\"\n    return TTestResult(\n        metric=\"\",  # caller fills\n        mean_a=sum(scores_a) / len(scores_a),\n        mean_b=sum(scores_b) / len(scores_b),\n        diff=diff,\n        t_statistic=float(result.statistic),\n        p_value=float(result.pvalue),\n        significant=bool(result.pvalue < alpha),\n        direction=direction,\n    )",
+        "start_line": 20,
+        "end_line": 49
+      },
+      "answer": {
+        "file": "evaluation/stats.py",
+        "symbol": "paired_t_test"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "paired_t_test"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "施策A/Bのスコア差が統計的に有意かを対応のあるt検定で判定（TTestResultを返す）。"
+    },
+    {
+      "id": "q_eval_003",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "evaluation/run_ragas.py",
+      "tags": [
+        "evaluation",
+        "ragas"
+      ],
+      "prompt": "RAGAS 評価を実行するエントリポイント関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "evaluation/run_ragas.py",
+        "symbol": {
+          "kind": "function",
+          "name": "main"
+        },
+        "evidence_substring": "def main",
+        "adr_ref": "ADR-019",
+        "snippet": "def main() -> int:\n    # build pipeline, build_dataset, run ragas, compare to baseline, maybe update",
+        "source": "def main() -> int:\n    p = argparse.ArgumentParser(description=\"Run RAGAS evaluation.\")\n    p.add_argument(\"--dataset\", type=Path, required=True)\n    p.add_argument(\n        \"--baseline\", type=Path, default=Path(\"evaluation/baseline.json\")\n    )\n    p.add_argument(\"--output\", type=Path, required=True)\n    p.add_argument(\"--update-baseline\", action=\"store_true\")\n    p.add_argument(\n        \"--regression-threshold\",\n        type=float,\n        default=0.05,\n        help=\"Warn if any metric drops by more than this fraction vs baseline.\",\n    )\n    p.add_argument(\n        \"--block-on-regression\",\n        action=\"store_true\",\n        help=\"Exit 1 if any metric drops > --regression-threshold from baseline (v0.8+)\",\n    )\n    args = p.parse_args()\n\n    engine, pipeline = _build_pipeline()\n    ds = build_dataset(args.dataset, engine, pipeline)\n\n    result = evaluate(\n        ds,\n        metrics=METRICS,\n        llm=get_judge_llm(),\n        embeddings=get_judge_embeddings(),\n        run_config=RunConfig(max_workers=2, max_retries=15, timeout=120),\n    )\n\n    # ragas v0.4 returns per-row lists; aggregate to scalar (ignore NaN from failed judge calls)\n    def _to_scalar(v):\n        if hasattr(v, '__iter__') and not isinstance(v, str):\n            arr = np.array(list(v), dtype=float)\n            return float(np.nanmean(arr)) if arr.size else float('nan')\n        return float(v)\n    scores = {m.name: _to_scalar(result[m.name]) for m in METRICS}\n    record: dict[str, Any] = {\n        \"timestamp\": datetime.now(UTC).isoformat(),\n        \"git_sha\": _git_sha(),\n        \"dataset\": str(args.dataset),\n        \"scores\": scores,\n    }\n    args.output.parent.mkdir(parents=True, exist_ok=True)\n    args.output.write_text(json.dumps(record, indent=2, ensure_ascii=False))\n\n    regressions = _check_regression(scores, args.baseline, args.regression_threshold)\n    _print_summary(scores, regressions)\n\n    if args.update_baseline:\n        args.baseline.write_text(json.dumps(record, indent=2, ensure_ascii=False))\n        print(f\"\\nBaseline updated: {args.baseline}\")\n\n    if args.block_on_regression and regressions:\n        print(f\"\\n## BLOCK: {len(regressions)} metrics regressed beyond threshold\")\n        return 1\n\n    return 0",
+        "start_line": 88,
+        "end_line": 147
+      },
+      "answer": {
+        "file": "evaluation/run_ragas.py",
+        "symbol": "main"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "main",
+          "run_pipeline"
+        ],
+        "accept_file_only_partial": 0.6
+      },
+      "explanation": "python -m evaluation.run_ragas のエントリ。dataset構築→ragas実行→baseline比較→（任意）更新。"
+    },
+    {
+      "id": "q_eval_004",
+      "difficulty": "L2",
+      "type": "location",
+      "module": "evaluation/run_ragas.py",
+      "tags": [
+        "evaluation",
+        "regression"
+      ],
+      "prompt": "ベースラインと比較してスコアの退行（regression）を判定する関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "evaluation/run_ragas.py",
+        "symbol": {
+          "kind": "function",
+          "name": "_check_regression"
+        },
+        "evidence_substring": "def _check_regression",
+        "adr_ref": "ADR-019",
+        "snippet": "def _check_regression(current, baseline, ...): # fail if metrics dropped beyond tolerance vs baseline.json",
+        "source": "def _check_regression(\n    scores: dict[str, float], baseline_path: Path, threshold: float\n) -> list[tuple[str, float, float]]:\n    if not baseline_path.exists():\n        return []\n    baseline = json.loads(baseline_path.read_text())[\"scores\"]\n    out = []\n    for k, v in scores.items():\n        b = baseline.get(k)\n        if b is None or b == 0.0:\n            continue\n        if (b - v) / b > threshold:\n            out.append((k, b, v))\n    return out",
+        "start_line": 150,
+        "end_line": 163
+      },
+      "answer": {
+        "file": "evaluation/run_ragas.py",
+        "symbol": "_check_regression"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "_check_regression"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "baseline.json比で許容超の低下があればCIをfailさせ、品質退行のマージを止める。"
+    },
+    {
+      "id": "q_eval_005",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "evaluation/run_ragas.py",
+      "tags": [
+        "evaluation",
+        "design"
+      ],
+      "prompt": "evaluation/baseline.json を保持し毎回比較する設計の狙いは？",
+      "citation": {
+        "file": "evaluation/run_ragas.py",
+        "symbol": {
+          "kind": "module",
+          "name": "usage docstring"
+        },
+        "evidence_substring": "--update-baseline",
+        "adr_ref": "ADR-019",
+        "snippet": "Usage: python -m evaluation.run_ragas --dataset ... --baseline evaluation/baseline.json --output ... --update-baseline"
+      },
+      "answer": {
+        "options": [
+          "デプロイを速くするため",
+          "過去スコアを基準に固定し、変更で RAG 品質が退行していないか自動で検知するため",
+          "APIキーを保存するため",
+          "フロントのキャッシュ用"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "RAG は変更で静かに精度が落ちやすい。baseline固定＋regression検知で“質を測りながら”改善する。"
+    },
+    {
+      "id": "q_fe3d_001",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "frontend/src/components/Knowledge3DGraph.tsx",
+      "tags": [
+        "frontend",
+        "graphrag",
+        "3d"
+      ],
+      "prompt": "ナレッジグラフを3D力学シミュレーションで描画するコンポーネントは？（ファイルとシンボル）",
+      "citation": {
+        "file": "frontend/src/components/Knowledge3DGraph.tsx",
+        "symbol": {
+          "kind": "component",
+          "name": "Knowledge3DGraph"
+        },
+        "evidence_substring": "ForceGraph3D",
+        "adr_ref": "ADR-025",
+        "snippet": "import ForceGraph3D from \"react-force-graph-3d\";\nexport function Knowledge3DGraph({ data, onNodeClick, highlightedId }: Props) { ... }",
+        "source": "export function Knowledge3DGraph({ data, onNodeClick, highlightedId }: Props) {\n  const nodes = useMemo(\n    () =>\n      data.nodes.map((n) => ({\n        id: n.id,\n        name: n.title || n.id,\n        val: 2 + n.in_degree + n.out_degree,\n        color: AXIS_COLORS[String(n.axes.category ?? \"\")] ?? \"#9ca3af\",\n        __raw: n,\n      })),\n    [data.nodes],\n  );\n\n  const links = useMemo(\n    () => data.edges.map((e) => ({ source: e.source, target: e.target })),\n    [data.edges],\n  );\n\n  // ForceGraph3D defaults width/height to window.innerWidth/innerHeight, which\n  // overflows the column and breaks page layout (see ADR-032). Measure the\n  // wrapper and feed explicit size props so the canvas fits its container.\n  const wrapRef = useRef<HTMLDivElement | null>(null);\n  const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });\n",
+        "start_line": 20,
+        "end_line": 43
+      },
+      "answer": {
+        "file": "frontend/src/components/Knowledge3DGraph.tsx",
+        "symbol": "Knowledge3DGraph"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "Knowledge3DGraph"
+        ],
+        "accept_file_only_partial": 0.7
+      },
+      "explanation": "react-force-graph-3d を使った /graph ページの3D可視化（spec_040/ADR-025）。"
+    },
+    {
+      "id": "q_fe3d_002",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "frontend/src/components/Knowledge3DGraph.tsx",
+      "tags": [
+        "frontend",
+        "3d"
+      ],
+      "prompt": "3Dグラフのノードの色は何で決まる？",
+      "citation": {
+        "file": "frontend/src/components/Knowledge3DGraph.tsx",
+        "symbol": {
+          "kind": "const",
+          "name": "AXIS_COLORS"
+        },
+        "evidence_substring": "AXIS_COLORS[String(n.axes.category",
+        "adr_ref": null,
+        "snippet": "const AXIS_COLORS = { 技術記事: '#3b82f6', メモ: '#a855f7', 議事録: '#22c55e', ToDo: '#f97316' };\ncolor: AXIS_COLORS[String(n.axes.category ?? \"\")] ?? \"#9ca3af\",",
+        "source": "const AXIS_COLORS: Record<string, string> = {\n  \"技術記事\": \"#3b82f6\",\n  \"メモ\": \"#a855f7\",\n  \"議事録\": \"#22c55e\",\n  \"ToDo\": \"#f97316\",\n};\n\nexport function Knowledge3DGraph({ data, onNodeClick, highlightedId }: Props) {\n  const nodes = useMemo(\n    () =>\n      data.nodes.map((n) => ({\n        id: n.id,\n        name: n.title || n.id,\n        val: 2 + n.in_degree + n.out_degree,\n        color: AXIS_COLORS[String(n.axes.category ?? \"\")] ?? \"#9ca3af\",\n        __raw: n,\n      })),\n    [data.nodes],\n  );\n\n  const links = useMemo(\n    () => data.edges.map((e) => ({ source: e.source, target: e.target })),\n    [data.edges],\n  );",
+        "start_line": 13,
+        "end_line": 36
+      },
+      "answer": {
+        "options": [
+          "ランダム",
+          "軸 category（AXIS_COLORS マップ）で色分け、未定義はグレー",
+          "in_degree のみ",
+          "ファイルサイズ"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "category 軸（技術記事/メモ/議事録/ToDo）で色分け。該当なしは #9ca3af（グレー）。"
+    },
+    {
+      "id": "q_fe3d_003",
+      "difficulty": "L2",
+      "type": "fill_blank",
+      "module": "frontend/src/components/Knowledge3DGraph.tsx",
+      "tags": [
+        "frontend",
+        "3d"
+      ],
+      "prompt": "ノードの大きさ val の式の空欄を埋めよ:\n    val: 2 + n.in_degree + n.____",
+      "citation": {
+        "file": "frontend/src/components/Knowledge3DGraph.tsx",
+        "symbol": {
+          "kind": "component",
+          "name": "Knowledge3DGraph"
+        },
+        "evidence_substring": "2 + n.in_degree + n.out_degree",
+        "adr_ref": null,
+        "snippet": "val: 2 + n.in_degree + n.out_degree,",
+        "source": "export function Knowledge3DGraph({ data, onNodeClick, highlightedId }: Props) {\n  const nodes = useMemo(\n    () =>\n      data.nodes.map((n) => ({\n        id: n.id,\n        name: n.title || n.id,\n        val: 2 + n.in_degree + n.out_degree,\n        color: AXIS_COLORS[String(n.axes.category ?? \"\")] ?? \"#9ca3af\",\n        __raw: n,\n      })),\n    [data.nodes],\n  );\n\n  const links = useMemo(\n    () => data.edges.map((e) => ({ source: e.source, target: e.target })),\n    [data.edges],\n  );\n\n  // ForceGraph3D defaults width/height to window.innerWidth/innerHeight, which\n  // overflows the column and breaks page layout (see ADR-032). Measure the\n  // wrapper and feed explicit size props so the canvas fits its container.\n  const wrapRef = useRef<HTMLDivElement | null>(null);\n  const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });\n",
+        "start_line": 20,
+        "end_line": 43
+      },
+      "answer": {
+        "accepted": [
+          "out_degree",
+          "n.out_degree"
+        ]
+      },
+      "grading": {
+        "casefold": true
+      },
+      "explanation": "ノードサイズ＝2＋入次数＋出次数。参照が多い doc ほど大きく描かれる。"
+    },
+    {
+      "id": "q_gc_001",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "frontend/src/lib/graphClient.ts",
+      "tags": [
+        "frontend",
+        "graphrag"
+      ],
+      "prompt": "spec_040 のグラフ API（/api/graph 等）を叩くフロントのクライアント/型はどのファイル？",
+      "citation": {
+        "file": "frontend/src/lib/graphClient.ts",
+        "symbol": {
+          "kind": "module",
+          "name": "module header"
+        },
+        "evidence_substring": "knowledge-graph endpoints",
+        "adr_ref": "ADR-024",
+        "snippet": "// API client for the spec_040 knowledge-graph endpoints.\n// Mirrors backend/src/schemas.py {Graph,Neighbor}Response.\nexport interface GraphNode { id; title; axes; in_degree; out_degree }"
+      },
+      "answer": {
+        "file": "frontend/src/lib/graphClient.ts",
+        "symbol": "graphClient"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "graphClient",
+          "GraphPayload",
+          "GraphNode"
+        ],
+        "accept_file_only_partial": 0.8
+      },
+      "explanation": "graphClient.ts がグラフ系エンドポイントの型とfetchを担う。型は backend/src/schemas.py をミラー。"
+    },
+    {
+      "id": "q_mcpf_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "mcp_server/formatters.py",
+      "tags": [
+        "mcp"
+      ],
+      "prompt": "mcp_server/formatters.py の役割は？",
+      "citation": {
+        "file": "mcp_server/formatters.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "shared across tools",
+        "adr_ref": null,
+        "snippet": "Markdown / JSON formatters shared across tools.\ndef format_search_results_md(...): ...\ndef format_answer_md(...): ..."
+      },
+      "answer": {
+        "options": [
+          "MCPの認証",
+          "各MCPツールが共有する出力整形（Markdown/JSON）",
+          "ベクトル検索本体",
+          "DB接続"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "axis_search / axis_answer / axis_chat 等が共通で使う、結果の Markdown/JSON 整形ユーティリティ。"
+    },
+    {
+      "id": "q_mcpf_002",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "mcp_server/formatters.py",
+      "tags": [
+        "mcp"
+      ],
+      "prompt": "検索結果を Markdown に整形する関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "mcp_server/formatters.py",
+        "symbol": {
+          "kind": "function",
+          "name": "format_search_results_md"
+        },
+        "evidence_substring": "def format_search_results_md",
+        "adr_ref": null,
+        "snippet": "def format_search_results_md(query, filters, results) -> str:\n    lines = []\n    title = f\"Search results for: `{query}`\" if query else \"Axis-only filter results\"",
+        "source": "def format_search_results_md(query: str | None, filters: dict, results: list[SearchResult]) -> str:\n    lines = []\n    title = f\"Search results for: `{query}`\" if query else \"Axis-only filter results\"\n    lines.append(f\"# {title}\")\n    if filters:\n        lines.append(f\"\\n**Filters**: {filters}\\n\")\n    lines.append(f\"\\n**{len(results)}** result(s)\\n\")\n    for r in results:\n        lines.append(f\"## [{r.score:.3f}] `{r.id}` — {r.title}\")\n        lines.append(f\"- axes: {r.axes}\")\n        if r.refs:\n            lines.append(f\"- refs: {r.refs}\")\n        lines.append(f\"\\n{r.body_snippet}\\n\")\n    return \"\\n\".join(lines)",
+        "start_line": 10,
+        "end_line": 23
+      },
+      "answer": {
+        "file": "mcp_server/formatters.py",
+        "symbol": "format_search_results_md"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "format_search_results_md"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "axis_search が返す Markdown を組み立てる。JSON版は format_search_results_json。"
+    },
+    {
+      "id": "q_df_ingest",
+      "difficulty": "L3",
+      "type": "dataflow",
+      "module": "backend/src/api.py",
+      "tags": [
+        "live-ingest",
+        "pipeline"
+      ],
+      "prompt": "POST /api/ingest/memo で送ったメモが検索可能になるまでの主要ステップを順に並べよ（候補: post_ingest_memo, _resolve_memo_path, ファイル書き込み, live_ingest(chunk→embed→upsert)）。",
+      "citation": {
+        "file": "backend/src/api.py",
+        "symbol": {
+          "kind": "function",
+          "name": "post_ingest_memo"
+        },
+        "evidence_substring": "_resolve_memo_path",
+        "adr_ref": null,
+        "snippet": "async def post_ingest_memo(req):\n    path = _resolve_memo_path(req, knowledge_dir)\n    path.write_text(markdown)\n    _live_ingest_path(path)   # chunk -> embed -> upsert into Chroma (no rebuild)",
+        "source": "async def post_ingest_memo(\n    req: MemoIngestRequest,\n    x_axis_token: str | None = Header(default=None, alias=\"X-Axis-Token\"),\n) -> MemoIngestResponse:\n    \"\"\"Live ingest one memo. Same X-Axis-Token gate as /api/ingest.\n\n    Two modes:\n      * ``markdown``: full YAML+md text; written to ``<knowledge_dir>/<id>.md``\n        (overwrites if it exists — re-ingest is upsert).\n      * ``path``: relative or absolute path under ``knowledge_dir`` of an\n        already-saved file.\n\n    Either way, the file is loaded, chunked, embedded and merged into the\n    running ChromaDB collection — and the KnowledgeGraph is rebuilt — so\n    ``POST /api/search`` and ``GET /api/graph`` show the new memo\n    immediately, with no ``build_index --rebuild`` and no backend restart.\n    \"\"\"\n    _require_ingest_token(x_axis_token)\n    if not req.markdown and not req.path:\n        raise HTTPException(\n            status_code=400, detail=\"one of 'markdown' or 'path' is required\"\n        )\n\n    knowledge_dir = Path(_state.get(\"knowledge_dir\", \"./examples/knowledge\"))\n    target = _resolve_memo_path(req, knowledge_dir)\n    try:\n        result = _live_ingest_path(target)\n    except HTTPException:\n        raise\n    except Exception as e:  # noqa: BLE001\n        raise HTTPException(status_code=500, detail=f\"ingest failed: {e}\") from e\n    _rebuild_graph_state()\n    return MemoIngestResponse(\n        doc_id=result.doc_id,\n        saved_path=str(target),\n        parents=result.parents,\n        children=result.children,\n        deleted_existing=result.deleted_existing,\n        indexed=True,\n    )",
+        "start_line": 444,
+        "end_line": 483
+      },
+      "answer": {
+        "sequence": [
+          "post_ingest_memo",
+          "_resolve_memo_path",
+          "write",
+          "live_ingest"
+        ]
+      },
+      "grading": {
+        "mode": "subsequence",
+        "pass_threshold": 0.66,
+        "aliases": [
+          [
+            "post_ingest_memo",
+            "endpoint",
+            "受領"
+          ],
+          [
+            "_resolve_memo_path",
+            "path",
+            "パス解決"
+          ],
+          [
+            "write",
+            "書き込み",
+            "保存",
+            "write_text"
+          ],
+          [
+            "live_ingest",
+            "_live_ingest_path",
+            "chunk",
+            "embed",
+            "upsert",
+            "索引"
+          ]
+        ]
+      },
+      "pool": [
+        "_resolve_memo_path",
+        "live_ingest",
+        "post_ingest_memo",
+        "write"
+      ],
+      "explanation": "受領→保存先パス解決→Markdown書き込み→live ingest（chunk→embed→Chromaにupsert、リビルド無し）で約1秒で検索可能に（spec_056）。"
+    },
+    {
+      "id": "q_df_chat",
+      "difficulty": "L3",
+      "type": "dataflow",
+      "module": "backend/src/rag.py",
+      "tags": [
+        "conversational-rag",
+        "pipeline"
+      ],
+      "prompt": "Conversational RAG（履歴付き）でフォローアップ質問に答えるまでの主要ステップを順に並べよ（候補: rewrite_question, engine.search, build_context, generate, 履歴保存）。",
+      "citation": {
+        "file": "backend/src/rag.py",
+        "symbol": {
+          "kind": "method",
+          "name": "RAGPipeline.chat"
+        },
+        "evidence_substring": "rewrite_question",
+        "adr_ref": "ADR-018",
+        "snippet": "def chat(self, question, session_id):\n    standalone = rewrite_question(history, question)\n    results = self._engine.search(standalone)\n    context = build_context(results)\n    text = self._call_generation(...)  # original question used for generation\n    store.append(session_id, ...)",
+        "source": "    def chat(\n        self,\n        question: str,\n        *,\n        session_id: str | None = None,\n        filters: dict[str, Any] | None = None,\n        top_k: int = 5,\n        max_tokens: int = 1024,\n        store: ConversationStore | None = None,\n        rewriter_enabled: bool = True,\n        rewriter_model: str = \"gemini-2.5-flash\",\n        history_turns: int = 6,\n    ) -> ChatResponse:\n        \"\"\"Single-turn chat that keeps history under ``session_id``.\n\n        Steps:\n        1. Look up (or create) the session in ``store``.\n        2. Rewrite the question into a standalone query using up to\n           ``history_turns`` turns of prior context.\n        3. Retrieve with the rewritten query, generate with Claude (or the\n           dummy fallback) — the generation prompt sees the *original*\n           question plus the last 3 turns of history.\n        4. Append user + assistant messages back into the session.\n        \"\"\"\n        # Use ``is None`` rather than ``store or ...`` — ConversationStore\n        # defines __len__, so an empty store is falsy and would silently\n        # fall through to the module default.\n        if store is None:\n            store = get_default_store()\n        session = store.get_or_create(session_id)\n\n        history = store.get_history(\n            session.session_id, last_n_turns=history_turns\n        )\n        rewritten = rewrite_question(\n            question,\n            history,\n            model_name=rewriter_model,\n            enabled=rewriter_enabled,\n        )\n        retrieval_query = rewritten or question\n\n        results = self._engine.search(retrieval_query, filters=filters, top_k=top_k)\n\n        if self._use_dummy:\n            ans = _dummy_answer(question, results)\n        else:\n            ans = self._generate_chat_answer(\n                question=question,\n                results=results,\n                history=history,\n                max_tokens=max_tokens,\n            )\n        # spec_048: chat path goes through the same gap detection — the\n        # rewritten question is what hit the index, but we want the\n        # user-facing string in the report so it's actionable.\n        self._record_llm_gap(question, ans.text, results)\n\n        # Persist turn — sources as plain dicts so the store stays\n        # JSON-friendly (the API returns them via asdict()).\n        sources_payload = [_source_to_dict(s) for s in ans.sources]\n        store.append(session.session_id, Message(role=\"user\", content=question))\n        store.append(\n            session.session_id,\n            Message(role=\"assistant\", content=ans.text, sources=sources_payload),\n        )\n\n        return ChatResponse(\n            session_id=session.session_id,\n            question=question,\n            rewritten_question=rewritten if rewritten != question else None,\n            answer=ans.text,\n            sources=ans.sources,\n            cited_ids=ans.cited_ids,\n            is_dummy=ans.is_dummy,\n            model=ans.model,\n        )",
+        "start_line": 625,
+        "end_line": 701
+      },
+      "answer": {
+        "sequence": [
+          "rewrite_question",
+          "search",
+          "build_context",
+          "generate",
+          "append"
+        ]
+      },
+      "grading": {
+        "mode": "subsequence",
+        "pass_threshold": 0.6,
+        "aliases": [
+          [
+            "rewrite_question",
+            "rewrite",
+            "書き換え",
+            "standalone"
+          ],
+          [
+            "search",
+            "engine.search",
+            "検索"
+          ],
+          [
+            "build_context",
+            "context",
+            "文脈"
+          ],
+          [
+            "generate",
+            "生成",
+            "llm"
+          ],
+          [
+            "append",
+            "履歴保存",
+            "保存",
+            "store",
+            "conversation"
+          ]
+        ]
+      },
+      "pool": [
+        "build_context",
+        "rewrite_question",
+        "append",
+        "search",
+        "generate"
+      ],
+      "explanation": "follow-upを standalone に書き換え→検索→文脈構築→（元質問で）生成→履歴に保存。検索は書き換え後、生成は元質問。"
+    },
+    {
+      "id": "q_rev_003",
+      "difficulty": "L2",
+      "type": "freetext",
+      "module": "backend/src/api.py",
+      "tags": [
+        "reverse",
+        "startup"
+      ],
+      "prompt": "次のコードの役割を一文で説明せよ:\n\n    @asynccontextmanager\n    async def lifespan(app):\n        # build graph, engine, stores\n        yield\n        # dispose",
+      "citation": {
+        "file": "backend/src/api.py",
+        "symbol": {
+          "kind": "function",
+          "name": "lifespan"
+        },
+        "evidence_substring": "build graph, engine, stores",
+        "adr_ref": null,
+        "snippet": "@asynccontextmanager\nasync def lifespan(app): # build graph, engine, stores at startup; yield; dispose at shutdown",
+        "source": "async def lifespan(app: FastAPI) -> AsyncIterator[None]:\n    configure_logging()\n    logger.info(\"Initializing axis-knowledge-rag API...\")\n    store = VectorStore(path=settings.chroma_db_path)\n    app_cfg = load_app_config()\n    embedder = make_embedder(app_cfg.embedder)\n    normalizer = Normalizer.from_config(load_axes_config())\n    # spec_051 HIGH-1: detect embedder ↔ index dim mismatch at startup.\n    # Empty store (probe returns None) skips silently — first ingest will\n    # set the dim. A mismatch is fatal because every subsequent query\n    # would crash inside Chroma with an opaque shape error.\n    try:\n        store_dim = store.probe_dim()\n    except Exception as e:  # noqa: BLE001\n        logger.warning(\"dim verification skipped: %s\", e)\n        store_dim = None\n    if store_dim is not None and store_dim != embedder.dim:\n        raise RuntimeError(\n            f\"Embedding dim mismatch: chroma store has dim={store_dim}, \"\n            f\"embedder ({type(embedder).__name__}) reports dim={embedder.dim}. \"\n            f\"config.yml で embedder.backend を変更した場合は \"\n            f\"`PYTHONPATH=. python3 -m scripts.build_index examples/knowledge --rebuild` \"\n            f\"を実行して index を rebuild してください。\"\n        )\n    pd = app_cfg.retrieval.parent_doc\n    if pd.enabled and not store.has_parents():\n        logger.warning(\n            \"parent_doc.enabled=true but parents.json is missing — falling back \"\n            \"to legacy file-level search. Run scripts/build_index.py --rebuild \"\n            \"--mode parent_doc to populate it.\"\n        )\n        parent_doc_enabled = False\n    else:\n        parent_doc_enabled = pd.enabled\n    graph: KnowledgeGraph | None = None\n    if app_cfg.graph.enabled:\n        # spec_042 LOW #5: building the graph walks the knowledge dir + parses\n        # frontmatter, which can stall lifespan for seconds on 1000+ doc\n        # corpora. Run it on the default executor so the event loop stays\n        # responsive (e.g. for liveness probes).\n        loop = asyncio.get_running_loop()\n        try:\n            graph = await loop.run_in_executor(\n                None, build_default_graph, app_cfg.graph.knowledge_dir\n            )\n            logger.info(\"knowledge graph stats: %s\", graph.stats())\n        except Exception as e:  # noqa: BLE001\n            logger.warning(\"failed to build knowledge graph: %s — disabling /api/graph\", e)\n            graph = None\n    # spec_048: build the gap store first so both the search engine\n    # (no_results / low_score) and the RAG pipeline (llm_no_info) can\n    # share the same backing SQLite. Disabled config → both hooks become\n    # no-ops without any further conditionals at the call sites.\n    gap_store = make_gap_store(app_cfg.gap)\n    if gap_store is not None:\n        logger.info(\"gap store: %s\", type(gap_store).__name__)\n    else:\n        logger.info(\"gap store: disabled (gap.enabled=false)\")\n    engine = SearchEngine(\n        store,\n        embedder,\n        normalizer,\n        parent_doc_enabled=parent_doc_enabled,\n        top_k_children=pd.top_k_children,\n        graph=graph,\n        gap_store=gap_store,\n        gap_low_score_threshold=app_cfg.gap.low_score_threshold,\n    )\n    rag = RAGPipeline(\n        engine,\n        context_max_chars=app_cfg.rag.context_max_chars,\n        backend=make_generation_backend(app_cfg.generation),\n        gap_store=gap_store,\n    )\n    chat_store = make_conversation_store(app_cfg.chat)\n    configure_default_store(chat_store)\n    logger.info(\n        \"chat store: %s (backend=%s)\",\n        type(chat_store).__name__,\n        app_cfg.chat.storage.backend,\n    )\n    feedback_store = make_feedback_store(app_cfg.feedback)\n    if feedback_store is not None:\n        logger.info(\"feedback store: %s\", type(feedback_store).__name__)\n    else:\n        logger.info(\"feedback store: disabled (feedback.enabled=false)\")\n    _state[\"engine\"] = engine\n    _state[\"rag\"] = rag\n    _state[\"embedder\"] = embedder\n    # spec_056: keep the live VectorStore + Normalizer so /api/ingest/memo can\n    # add chunks against the same collection the engine is querying — drop+\n    # recreate would invalidate the engine's collection handle.\n    _state[\"store\"] = store\n    _state[\"normalizer\"] = normalizer\n    _state[\"retrieval_cfg\"] = app_cfg.retrieval\n    _state[\"axes_cfg\"] = load_axes_config()\n    _state[\"chat_store\"] = chat_store\n    _state[\"chat_cfg\"] = app_cfg.chat\n    _state[\"graph\"] = graph\n    _state[\"graph_cfg\"] = app_cfg.graph\n    _state[\"knowledge_dir\"] = app_cfg.graph.knowledge_dir\n    _state[\"feedback_store\"] = feedback_store\n    _state[\"feedback_cfg\"] = app_cfg.feedback\n    _state[\"gap_store\"] = gap_store\n    _state[\"gap_cfg\"] = app_cfg.gap\n    try:\n        yield\n    finally:\n        try:\n            chat_store.close()\n        except Exception:  # noqa: BLE001\n            logger.warning(\"chat store close failed\", exc_info=True)\n        if feedback_store is not None:\n            try:\n                feedback_store.close()\n            except Exception:  # noqa: BLE001\n                logger.warning(\"feedback store close failed\", exc_info=True)\n        if gap_store is not None:\n            try:\n                gap_store.close()\n            except Exception:  # noqa: BLE001\n                logger.warning(\"gap store close failed\", exc_info=True)\n        _state.clear()",
+        "start_line": 68,
+        "end_line": 190
+      },
+      "answer": {
+        "model_answer": "FastAPI 起動時にグラフ・検索エンジン・各ストアを1度だけ構築し、終了時に後始末する起動/終了フック。",
+        "required_keywords": [
+          {
+            "any_of": [
+              "起動",
+              "startup",
+              "立ち上げ",
+              "開始"
+            ]
+          },
+          {
+            "any_of": [
+              "1度",
+              "一度",
+              "1回",
+              "once",
+              "初期化",
+              "構築"
+            ]
+          },
+          {
+            "any_of": [
+              "グラフ",
+              "エンジン",
+              "ストア",
+              "engine",
+              "store"
+            ]
+          }
+        ],
+        "forbidden_keywords": []
+      },
+      "grading": {
+        "min_keyword_coverage": 0.66
+      },
+      "explanation": "逆向き問題：lifespan＝起動時1回の初期化＋終了時後始末、という役割を言語化させる。"
+    },
+    {
+      "id": "q_rev_004",
+      "difficulty": "L2",
+      "type": "freetext",
+      "module": "frontend/src/lib/graphClient.ts",
+      "tags": [
+        "reverse",
+        "graphrag"
+      ],
+      "prompt": "次の型の in_degree / out_degree は何を表すか説明せよ:\n\n    interface GraphNode { id; title; axes; in_degree; out_degree }",
+      "citation": {
+        "file": "frontend/src/lib/graphClient.ts",
+        "symbol": {
+          "kind": "interface",
+          "name": "GraphNode"
+        },
+        "evidence_substring": "in_degree",
+        "adr_ref": "ADR-024",
+        "snippet": "export interface GraphNode { id: string; title: string; axes; in_degree: number; out_degree: number }"
+      },
+      "answer": {
+        "model_answer": "in_degree=その文書が他から参照されている数（被参照/入次数）、out_degree=その文書が refs で参照している数（参照/出次数）。",
+        "required_keywords": [
+          {
+            "any_of": [
+              "入次数",
+              "被参照",
+              "参照されている",
+              "in"
+            ]
+          },
+          {
+            "any_of": [
+              "出次数",
+              "参照している",
+              "refs",
+              "out"
+            ]
+          },
+          {
+            "any_of": [
+              "参照",
+              "リンク",
+              "辺",
+              "エッジ",
+              "edge"
+            ]
+          }
+        ],
+        "forbidden_keywords": []
+      },
+      "grading": {
+        "min_keyword_coverage": 0.66
+      },
+      "explanation": "逆向き問題：有向グラフの入次数/出次数＝被参照数/参照数。ノードサイズ(val)にも使われる。"
     }
   ]
 }
