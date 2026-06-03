@@ -3992,6 +3992,478 @@
         "min_keyword_coverage": 0.66
       },
       "explanation": "逆向き×Reactイディオム。クリーンアップでフラグを立て、遅延して届いた結果のsetStateを抑止する定石。"
+    },
+    {
+      "id": "q_li_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/live_ingest.py",
+      "tags": [
+        "live-ingest",
+        "idempotent"
+      ],
+      "prompt": "live ingest が取り込み前に必ず VectorStore.delete_doc を呼ぶのはなぜ？",
+      "citation": {
+        "file": "backend/src/live_ingest.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "re-ingest an upsert",
+        "adr_ref": null,
+        "snippet": "the only difference is scope (one file) and that we ``delete_doc`` first to make re-ingest an upsert rather than a DuplicateIDError."
+      },
+      "answer": {
+        "options": [
+          "容量削減のため",
+          "同じdoc_idの再取り込みをupsert化し、重複ID エラーとチャンク二重化を防ぐ（冪等性）",
+          "削除ログを残すため",
+          "Chromaの仕様で必須だから"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "先に消してから入れる＝2回呼んでも結果が同じ（冪等）。DuplicateIDErrorも起きない。"
+    },
+    {
+      "id": "q_li_002",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "backend/src/live_ingest.py",
+      "tags": [
+        "live-ingest",
+        "design"
+      ],
+      "prompt": "live ingest が loader.load_document と chunker.chunk_markdown を“再利用”している設計意図は？",
+      "citation": {
+        "file": "backend/src/live_ingest.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "parent/child structure stays identical",
+        "adr_ref": null,
+        "snippet": "Reuses ``loader.load_document`` + ``chunker.chunk_markdown`` so the parent/child structure stays identical to a full rebuild — the only difference is scope (one file)."
+      },
+      "answer": {
+        "options": [
+          "コード行数を減らすためだけ",
+          "フルリビルドと完全に同じparent/child構造を保証し、ライブ取り込み分だけ構造が違う事故を防ぐため",
+          "速度が10倍になるから",
+          "テストを書かなくて済むから"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "経路が違っても成果物の構造は同一、が肝。差は範囲（1ファイル）と事前delete_docだけ。"
+    },
+    {
+      "id": "q_li_003",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "backend/src/live_ingest.py",
+      "tags": [
+        "live-ingest"
+      ],
+      "prompt": "単一Markdownファイルを稼働中の索引へ取り込む関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/live_ingest.py",
+        "symbol": {
+          "kind": "function",
+          "name": "ingest_file"
+        },
+        "evidence_substring": "def ingest_file",
+        "adr_ref": null,
+        "snippet": "def ingest_file(path, *, store, embedder, normalizer, max_child_tokens=256) -> LiveIngestResult:\n    \"\"\"Load, chunk, embed one Markdown file and merge into the running store.\"\"\"",
+        "source": "def ingest_file(\n    path: Path,\n    *,\n    store: VectorStore,\n    embedder: Embedder,\n    normalizer: Normalizer,\n    max_child_tokens: int = 256,\n) -> LiveIngestResult:\n    \"\"\"Load, chunk, embed one Markdown file and merge into the running store.\n\n    Idempotent — calling twice with the same ``doc_id`` does not double the\n    chunk count because ``VectorStore.delete_doc`` runs first.\n\n    The frontmatter dict handed to ``chunk_markdown`` mirrors what\n    ``scripts.build_index`` passes for parent_doc mode so child metadata\n    (``axes`` / ``normalized_axes`` / ``title``) stays consistent.\n    \"\"\"\n    doc = load_document(path, normalizer=normalizer)\n\n    fm = {\n        \"title\": doc.title,\n        \"axes\": doc.axes,\n        \"normalized_axes\": doc.normalized_axes,\n        \"tags\": doc.tags,\n        \"refs\": doc.refs,\n        \"path\": str(doc.path),\n    }\n    parents, children = chunk_markdown(\n        doc.id, doc.body, fm, max_child_tokens=max_child_tokens\n    )\n    deleted = store.delete_doc(doc.id)\n\n    if not children:\n        # Empty body — still surface the parent so re-ingest stays consistent.\n        store.add_chunks(parents, [], [])\n        return LiveIngestResult(\n            doc_id=doc.id, parents=len(parents), children=0, deleted_existing=deleted\n        )\n\n    embeddings = embedder.embed_batch([normalizer(c.text) for c in children])\n    store.add_chunks(parents, children, embeddings)\n    logger.info(\n        \"live ingest: %s → %d parents / %d children (deleted_existing=%d)\",\n        doc.id, len(parents), len(children), deleted,\n    )\n    return LiveIngestResult(\n        doc_id=doc.id,\n        parents=len(parents),\n        children=len(children),\n        deleted_existing=deleted,\n    )",
+        "start_line": 34,
+        "end_line": 84
+      },
+      "answer": {
+        "file": "backend/src/live_ingest.py",
+        "symbol": "ingest_file"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "ingest_file"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "/api/ingest/memo と /api/ingest の両方がこれを使う。戻り値は LiveIngestResult。"
+    },
+    {
+      "id": "q_bi_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "scripts/build_index.py",
+      "tags": [
+        "build-index",
+        "config"
+      ],
+      "prompt": "build_index の --mode auto（既定）は何を見てモードを決める？",
+      "citation": {
+        "file": "scripts/build_index.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "pick based on ``config.yml``",
+        "adr_ref": null,
+        "snippet": "``--mode auto`` (default): pick based on ``config.yml`` → ``retrieval.parent_doc.enabled``."
+      },
+      "answer": {
+        "options": [
+          "環境変数 MODE",
+          "config.yml の retrieval.parent_doc.enabled",
+          "ファイル数が100以上か",
+          "GPUの有無"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "configがparent_doc有効ならparent_docモード、無効ならlegacy（ファイル単位）。"
+    },
+    {
+      "id": "q_bi_002",
+      "difficulty": "L2",
+      "type": "fill_blank",
+      "module": "scripts/build_index.py",
+      "tags": [
+        "build-index"
+      ],
+      "prompt": "v0.6挙動（ファイル単位embedding）で索引を作るモード名は？\n    --mode ____ : file-level embedding (v0.6 behavior)",
+      "citation": {
+        "file": "scripts/build_index.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "--mode legacy``: file-level embedding",
+        "adr_ref": null,
+        "snippet": "* ``--mode legacy``: file-level embedding (v0.6 behavior).\n* ``--mode parent_doc``: chunk each .md into H2-section parents + children."
+      },
+      "answer": {
+        "accepted": [
+          "legacy"
+        ]
+      },
+      "grading": {
+        "casefold": true
+      },
+      "explanation": "legacy=ファイル丸ごと、parent_doc=H2親＋子チャンク。後方互換のために両方残す。"
+    },
+    {
+      "id": "q_df_build",
+      "difficulty": "L3",
+      "type": "dataflow",
+      "module": "scripts/build_index.py",
+      "tags": [
+        "build-index",
+        "pipeline"
+      ],
+      "prompt": "build_index（parent_docモード）が索引を作るまでの主要ステップを順に並べよ（候補: load_directory, chunk_markdown, embed(children), add_chunks）。",
+      "citation": {
+        "file": "scripts/build_index.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "chunk each .md into H2-section parents",
+        "adr_ref": "ADR-017",
+        "snippet": "``--mode parent_doc``: chunk each .md into H2-section parents + paragraph-level children, embed the children, and write parents to ``parents.db`` next to the Chroma directory."
+      },
+      "answer": {
+        "sequence": [
+          "load_directory",
+          "chunk_markdown",
+          "embed",
+          "add_chunks"
+        ]
+      },
+      "grading": {
+        "mode": "subsequence",
+        "pass_threshold": 0.75,
+        "aliases": [
+          [
+            "load_directory",
+            "load",
+            "読み込み",
+            "loader"
+          ],
+          [
+            "chunk_markdown",
+            "chunk",
+            "チャンク",
+            "分割"
+          ],
+          [
+            "embed",
+            "埋め込み",
+            "embedding",
+            "embedder"
+          ],
+          [
+            "add_chunks",
+            "upsert",
+            "書き込み",
+            "保存",
+            "chroma"
+          ]
+        ]
+      },
+      "pool": [
+        "embed",
+        "add_chunks",
+        "load_directory",
+        "chunk_markdown"
+      ],
+      "explanation": "読み込み→H2親＋子に分割→子だけembed→add_chunksで子をChroma・親をparents.dbへ。"
+    },
+    {
+      "id": "q_vs_004",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/vector_store.py",
+      "tags": [
+        "parent-doc",
+        "scoring"
+      ],
+      "prompt": "query_with_parents で parent に与えられるスコアは？",
+      "citation": {
+        "file": "backend/src/vector_store.py",
+        "symbol": {
+          "kind": "method",
+          "name": "VectorStore.query_with_parents"
+        },
+        "evidence_substring": "best (max) cosine similarity",
+        "adr_ref": "ADR-017",
+        "snippet": "\"\"\"Retrieve children, dedup by ``parent_id``, return top N parents.\nScore per parent is the best (max) cosine similarity among its matched children — gives the parent its strongest hit's score.\"\"\"",
+        "source": "    def query_with_parents(\n        self,\n        embedding: list[float],\n        *,\n        top_k_children: int = 20,\n        top_n_parents: int = 5,\n        where: dict[str, Any] | None = None,\n    ) -> list[tuple[ParentChunk, float]]:\n        \"\"\"Retrieve children, dedup by ``parent_id``, return top N parents.\n\n        Score per parent is the best (max) cosine similarity among its\n        matched children — gives the parent its strongest hit's score.\n        \"\"\"\n        raw = self.query_children(\n            embedding, n_results=top_k_children, where=where\n        )\n        metadatas = raw.get(\"metadatas\", [[]])[0] or []\n        distances = raw.get(\"distances\", [[]])[0] or []\n\n        best: dict[str, float] = {}\n        for md, dist in zip(metadatas, distances, strict=True):\n            pid = (md or {}).get(\"parent_id\")\n            if not pid:\n                continue\n            score = max(0.0, min(1.0, 1.0 - float(dist)))\n            if pid not in best or score > best[pid]:\n                best[pid] = score\n\n        ranked = sorted(best.items(), key=lambda kv: kv[1], reverse=True)\n        top_pids = [pid for pid, _ in ranked]\n        fetched = {p.parent_id: p for p in self._parent_storage.get_many(top_pids)}\n\n        out: list[tuple[ParentChunk, float]] = []\n        for pid, score in ranked:\n            parent = fetched.get(pid)\n            if parent is None:\n                logger.warning(\"parent_id %s referenced by a child has no entry in parents\", pid)\n                continue\n            out.append((parent, score))\n            if len(out) >= top_n_parents:\n                break\n        return out",
+        "start_line": 366,
+        "end_line": 407
+      },
+      "answer": {
+        "options": [
+          "子スコアの平均",
+          "ヒットした子のうち最大（best）のコサイン類似度",
+          "子の数",
+          "親本文の長さで正規化した値"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "平均でなく最大＝「一番強くヒットした子」を親の代表スコアにする。局所的に強い一致を尊重。"
+    },
+    {
+      "id": "q_vs_005",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/vector_store.py",
+      "tags": [
+        "parent-doc",
+        "storage"
+      ],
+      "prompt": "add_chunks で child を Chroma に入れる際、parent との紐付けはどう保持される？",
+      "citation": {
+        "file": "backend/src/vector_store.py",
+        "symbol": {
+          "kind": "method",
+          "name": "VectorStore.add_chunks"
+        },
+        "evidence_substring": "written into each child's",
+        "adr_ref": "ADR-023",
+        "snippet": "``parent_id`` is written into each child's metadata so search can deduplicate and look up the parent text. Parents are persisted via ``_parent_storage`` (SQLite by default).",
+        "source": "    def add_chunks(\n        self,\n        parents: list[ParentChunk],\n        children: list[ChildChunk],\n        child_embeddings: list[list[float]],\n    ) -> None:\n        \"\"\"Persist parents + embed children for parent-document retrieval.\n\n        Children are stored in the same Chroma collection as legacy\n        Documents (different id namespace — child ids carry ``#``), keyed\n        by their ``child_id``. ``parent_id`` is written into each child's\n        metadata so search can deduplicate and look up the parent text.\n\n        Parents are persisted via ``_parent_storage`` (SQLite by default)\n        and also cached in-memory.\n        \"\"\"\n        if len(children) != len(child_embeddings):\n            raise ValueError(\"children and embeddings length mismatch\")\n\n        self._parents = {p.parent_id: p for p in parents}\n        self._parent_storage.upsert_many(parents)\n\n        if not children:\n            return\n\n        ids = [c.child_id for c in children]\n        metadatas: list[dict[str, Any]] = []\n        documents: list[str] = []\n        for c in children:\n            md: dict[str, Any] = {\n                \"parent_id\": c.parent_id,\n                \"doc_id\": c.doc_id,\n                \"kind\": \"child\",\n                \"token_estimate\": c.token_estimate,\n            }\n            md.update(_flatten_axes(c.metadata.get(\"axes\", {}) or {}))\n            normalized_axes = c.metadata.get(\"normalized_axes\") or {}\n            for k, v in normalized_axes.items():\n                md[f\"axis_{k}_norm\"] = v\n            title = c.metadata.get(\"title\")\n            if isinstance(title, str):\n                md[\"title\"] = title\n            metadatas.append(md)\n            documents.append(c.text)\n\n        self._collection.add(\n            ids=ids,\n            embeddings=child_embeddings,\n            documents=documents,\n            metadatas=metadatas,\n        )",
+        "start_line": 300,
+        "end_line": 350
+      },
+      "answer": {
+        "options": [
+          "別テーブルの外部キー",
+          "各childのmetadataに parent_id を書き込む（検索時にdedupと親本文の引き当てに使う）",
+          "ファイル名の規約のみ",
+          "紐付けは保持されない"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "childのmetadata内parent_idが唯一のリンク。検索→parent_idでまとめ→parents.dbから親本文を取得。"
+    },
+    {
+      "id": "q_adr22_001",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "docs/adr/ADR-022-session-persistence.md",
+      "tags": [
+        "conversational-rag",
+        "design"
+      ],
+      "prompt": "v0.7 の in-memory 会話ストアで実際に顕在化した問題は？（ADR-022）",
+      "citation": {
+        "file": "docs/adr/ADR-022-session-persistence.md",
+        "symbol": {
+          "kind": "section",
+          "name": "Context"
+        },
+        "evidence_substring": "Worker affinity",
+        "adr_ref": "ADR-022",
+        "snippet": "1. Worker affinity — workers>1 だと同じsession_idが別プロセスに行き履歴が空に見える。2. No durability — 再起動で全会話消失。3. Single-host ceiling — ノードをまたいでスケールできない。"
+      },
+      "answer": {
+        "options": [
+          "メモリ使用量が多すぎた",
+          "worker間でセッションが共有されない／再起動で消える／単一ホスト限界、の3点",
+          "暗号化されていなかった",
+          "履歴が長すぎてLLMに入らなかった"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "「一番安いもので出す→限界が見えたら永続化」の段階設計。sqlite(WAL)既定への移行理由。"
+    },
+    {
+      "id": "q_adr22_002",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "docs/adr/ADR-022-session-persistence.md",
+      "tags": [
+        "conversational-rag"
+      ],
+      "prompt": "uvicorn --workers を2以上にした時、in-memory ストアで何が起きていた？",
+      "citation": {
+        "file": "docs/adr/ADR-022-session-persistence.md",
+        "symbol": {
+          "kind": "section",
+          "name": "Context"
+        },
+        "evidence_substring": "about 50 % of the time",
+        "adr_ref": "ADR-022",
+        "snippet": "Subsequent requests for the same session_id land on a different worker about 50 % of the time and see an empty history."
+      },
+      "answer": {
+        "options": [
+          "毎回エラーになる",
+          "同じsession_idのリクエストが約50%の確率で別workerに当たり、履歴が空に見える",
+          "履歴が2倍になる",
+          "何も起きない"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "プロセスごとに別のdictを持つため。sqlite共有でworker横断の一貫性を回復。"
+    },
+    {
+      "id": "q_adr25_001",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "docs/adr/ADR-025-3d-graph-visualization.md",
+      "tags": [
+        "3d",
+        "design"
+      ],
+      "prompt": "リスト表示が揃っているのに、わざわざ /graph（3D可視化）を追加した理由は？（ADR-025）",
+      "citation": {
+        "file": "docs/adr/ADR-025-3d-graph-visualization.md",
+        "symbol": {
+          "kind": "section",
+          "name": "Context"
+        },
+        "evidence_substring": "Lists hide topological",
+        "adr_ref": "ADR-025",
+        "snippet": "The existing UI surfaces all present knowledge as lists. Lists hide topological features (clusters, hubs, isolated docs) that frontmatter authors already encoded through their refs: choices."
+      },
+      "answer": {
+        "options": [
+          "3Dの方が処理が速いから",
+          "リストでは見えない位相的特徴（クラスタ・ハブ・孤立doc）を、refsが既に持つ構造として見せるため",
+          "モバイル対応のため",
+          "リストはメモリを食うから"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "refs: に既に埋まっている「構造」を人間に返す。クラスタ＝テーマ群、ハブ＝中心文書、孤立＝放置doc が一目で分かる。"
+    },
+    {
+      "id": "q_rev_007",
+      "difficulty": "L3",
+      "type": "freetext",
+      "module": "backend/src/vector_store.py",
+      "tags": [
+        "reverse",
+        "parent-doc"
+      ],
+      "prompt": "次のロジックが何をしているか説明せよ:\n\n    best = {}\n    for md, dist in zip(metadatas, distances):\n        pid = md.get(\"parent_id\")\n        score = max(0.0, min(1.0, 1.0 - dist))\n        if pid and score > best.get(pid, -1):\n            best[pid] = score",
+      "citation": {
+        "file": "backend/src/vector_store.py",
+        "symbol": {
+          "kind": "method",
+          "name": "VectorStore.query_with_parents"
+        },
+        "evidence_substring": "best: dict[str, float] = {}",
+        "adr_ref": "ADR-017",
+        "snippet": "best: dict[str, float] = {}\nfor md, dist in zip(metadatas, distances, strict=True):\n    pid = (md or {}).get(\"parent_id\")\n    score = max(0.0, min(1.0, 1.0 - float(dist)))  # keep the max child score per parent_id",
+        "source": "    def query_with_parents(\n        self,\n        embedding: list[float],\n        *,\n        top_k_children: int = 20,\n        top_n_parents: int = 5,\n        where: dict[str, Any] | None = None,\n    ) -> list[tuple[ParentChunk, float]]:\n        \"\"\"Retrieve children, dedup by ``parent_id``, return top N parents.\n\n        Score per parent is the best (max) cosine similarity among its\n        matched children — gives the parent its strongest hit's score.\n        \"\"\"\n        raw = self.query_children(\n            embedding, n_results=top_k_children, where=where\n        )\n        metadatas = raw.get(\"metadatas\", [[]])[0] or []\n        distances = raw.get(\"distances\", [[]])[0] or []\n\n        best: dict[str, float] = {}\n        for md, dist in zip(metadatas, distances, strict=True):\n            pid = (md or {}).get(\"parent_id\")\n            if not pid:\n                continue\n            score = max(0.0, min(1.0, 1.0 - float(dist)))\n            if pid not in best or score > best[pid]:\n                best[pid] = score\n\n        ranked = sorted(best.items(), key=lambda kv: kv[1], reverse=True)\n        top_pids = [pid for pid, _ in ranked]\n        fetched = {p.parent_id: p for p in self._parent_storage.get_many(top_pids)}\n\n        out: list[tuple[ParentChunk, float]] = []\n        for pid, score in ranked:\n            parent = fetched.get(pid)\n            if parent is None:\n                logger.warning(\"parent_id %s referenced by a child has no entry in parents\", pid)\n                continue\n            out.append((parent, score))\n            if len(out) >= top_n_parents:\n                break\n        return out",
+        "start_line": 366,
+        "end_line": 407
+      },
+      "answer": {
+        "model_answer": "ヒットした子チャンクをparent_idごとにまとめ、各親に「最も良い子のスコア（距離を1-distで類似度化した最大値）」を代表スコアとして残す集約処理。",
+        "required_keywords": [
+          {
+            "any_of": [
+              "parent",
+              "親",
+              "parent_id"
+            ]
+          },
+          {
+            "any_of": [
+              "子",
+              "child",
+              "チャンク"
+            ]
+          },
+          {
+            "any_of": [
+              "最大",
+              "max",
+              "最良",
+              "ベスト",
+              "一番"
+            ]
+          }
+        ],
+        "forbidden_keywords": []
+      },
+      "grading": {
+        "min_keyword_coverage": 0.66
+      },
+      "explanation": "逆向き×集約ロジック読解。子→親のdedupと max スコア代表化が Parent Document 検索の心臓部。"
+    },
+    {
+      "id": "q_li_004",
+      "difficulty": "L1",
+      "type": "fill_blank",
+      "module": "backend/src/live_ingest.py",
+      "tags": [
+        "live-ingest"
+      ],
+      "prompt": "LiveIngestResult のフィールドの空欄を埋めよ:\n    doc_id / parents / children / ____（事前削除した既存チャンク数）",
+      "citation": {
+        "file": "backend/src/live_ingest.py",
+        "symbol": {
+          "kind": "class",
+          "name": "LiveIngestResult"
+        },
+        "evidence_substring": "deleted_existing",
+        "adr_ref": null,
+        "snippet": "@dataclass(frozen=True)\nclass LiveIngestResult:\n    doc_id: str\n    parents: int\n    children: int\n    deleted_existing: int",
+        "source": "class LiveIngestResult:\n    doc_id: str\n    parents: int\n    children: int\n    deleted_existing: int",
+        "start_line": 27,
+        "end_line": 31
+      },
+      "answer": {
+        "accepted": [
+          "deleted_existing"
+        ]
+      },
+      "grading": {
+        "casefold": true
+      },
+      "explanation": "冪等性の証跡。再ingest時はここに削除された旧チャンク数が入る。"
     }
   ]
 }
