@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Data (runtime state)
+data/progress.db
+data/*.db
+data/_*.db
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Scratch files (created during setup; safe to delete)
+__probe.txt
+**/__captest.txt
+
+# Env / editor / OS
+.env
+.env.*
+!.env.example
+!*.example
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
