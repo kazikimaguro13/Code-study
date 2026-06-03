@@ -1,0 +1,122 @@
+{
+  "batch": "03",
+  "modules": ["frontend/Knowledge3DGraph", "frontend/graphClient", "mcp_server/formatters", "dataflow", "reverse"],
+  "questions": [
+    {
+      "id": "q_fe3d_001", "difficulty": "L1", "type": "location", "module": "frontend/src/components/Knowledge3DGraph.tsx", "tags": ["frontend", "graphrag", "3d"],
+      "prompt": "ナレッジグラフを3D力学シミュレーションで描画するコンポーネントは？（ファイルとシンボル）",
+      "citation": {"file": "frontend/src/components/Knowledge3DGraph.tsx", "symbol": {"kind": "component", "name": "Knowledge3DGraph"},
+        "evidence_substring": "ForceGraph3D",
+        "adr_ref": "ADR-025",
+        "snippet": "import ForceGraph3D from \"react-force-graph-3d\";\nexport function Knowledge3DGraph({ data, onNodeClick, highlightedId }: Props) { ... }"},
+      "answer": {"file": "frontend/src/components/Knowledge3DGraph.tsx", "symbol": "Knowledge3DGraph"},
+      "grading": {"symbol_aliases": ["Knowledge3DGraph"], "accept_file_only_partial": 0.7},
+      "explanation": "react-force-graph-3d を使った /graph ページの3D可視化（spec_040/ADR-025）。"
+    },
+    {
+      "id": "q_fe3d_002", "difficulty": "L2", "type": "mcq", "module": "frontend/src/components/Knowledge3DGraph.tsx", "tags": ["frontend", "3d"],
+      "prompt": "3Dグラフのノードの色は何で決まる？",
+      "citation": {"file": "frontend/src/components/Knowledge3DGraph.tsx", "symbol": {"kind": "const", "name": "AXIS_COLORS"},
+        "evidence_substring": "AXIS_COLORS[String(n.axes.category",
+        "adr_ref": null,
+        "snippet": "const AXIS_COLORS = { 技術記事: '#3b82f6', メモ: '#a855f7', 議事録: '#22c55e', ToDo: '#f97316' };\ncolor: AXIS_COLORS[String(n.axes.category ?? \"\")] ?? \"#9ca3af\","},
+      "answer": {"options": ["ランダム", "軸 category（AXIS_COLORS マップ）で色分け、未定義はグレー", "in_degree のみ", "ファイルサイズ"], "correct_index": 1},
+      "explanation": "category 軸（技術記事/メモ/議事録/ToDo）で色分け。該当なしは #9ca3af（グレー）。"
+    },
+    {
+      "id": "q_fe3d_003", "difficulty": "L2", "type": "fill_blank", "module": "frontend/src/components/Knowledge3DGraph.tsx", "tags": ["frontend", "3d"],
+      "prompt": "ノードの大きさ val の式の空欄を埋めよ:\n    val: 2 + n.in_degree + n.____",
+      "citation": {"file": "frontend/src/components/Knowledge3DGraph.tsx", "symbol": {"kind": "component", "name": "Knowledge3DGraph"},
+        "evidence_substring": "2 + n.in_degree + n.out_degree",
+        "adr_ref": null,
+        "snippet": "val: 2 + n.in_degree + n.out_degree,"},
+      "answer": {"accepted": ["out_degree", "n.out_degree"]},
+      "grading": {"casefold": true},
+      "explanation": "ノードサイズ＝2＋入次数＋出次数。参照が多い doc ほど大きく描かれる。"
+    },
+    {
+      "id": "q_gc_001", "difficulty": "L1", "type": "location", "module": "frontend/src/lib/graphClient.ts", "tags": ["frontend", "graphrag"],
+      "prompt": "spec_040 のグラフ API（/api/graph 等）を叩くフロントのクライアント/型はどのファイル？",
+      "citation": {"file": "frontend/src/lib/graphClient.ts", "symbol": {"kind": "module", "name": "module header"},
+        "evidence_substring": "knowledge-graph endpoints",
+        "adr_ref": "ADR-024",
+        "snippet": "// API client for the spec_040 knowledge-graph endpoints.\n// Mirrors backend/src/schemas.py {Graph,Neighbor}Response.\nexport interface GraphNode { id; title; axes; in_degree; out_degree }"},
+      "answer": {"file": "frontend/src/lib/graphClient.ts", "symbol": "graphClient"},
+      "grading": {"symbol_aliases": ["graphClient", "GraphPayload", "GraphNode"], "accept_file_only_partial": 0.8},
+      "explanation": "graphClient.ts がグラフ系エンドポイントの型とfetchを担う。型は backend/src/schemas.py をミラー。"
+    },
+    {
+      "id": "q_mcpf_001", "difficulty": "L2", "type": "mcq", "module": "mcp_server/formatters.py", "tags": ["mcp"],
+      "prompt": "mcp_server/formatters.py の役割は？",
+      "citation": {"file": "mcp_server/formatters.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "shared across tools",
+        "adr_ref": null,
+        "snippet": "Markdown / JSON formatters shared across tools.\ndef format_search_results_md(...): ...\ndef format_answer_md(...): ..."},
+      "answer": {"options": ["MCPの認証", "各MCPツールが共有する出力整形（Markdown/JSON）", "ベクトル検索本体", "DB接続"], "correct_index": 1},
+      "explanation": "axis_search / axis_answer / axis_chat 等が共通で使う、結果の Markdown/JSON 整形ユーティリティ。"
+    },
+    {
+      "id": "q_mcpf_002", "difficulty": "L1", "type": "location", "module": "mcp_server/formatters.py", "tags": ["mcp"],
+      "prompt": "検索結果を Markdown に整形する関数は？（ファイルとシンボル）",
+      "citation": {"file": "mcp_server/formatters.py", "symbol": {"kind": "function", "name": "format_search_results_md"},
+        "evidence_substring": "def format_search_results_md",
+        "adr_ref": null,
+        "snippet": "def format_search_results_md(query, filters, results) -> str:\n    lines = []\n    title = f\"Search results for: `{query}`\" if query else \"Axis-only filter results\""},
+      "answer": {"file": "mcp_server/formatters.py", "symbol": "format_search_results_md"},
+      "grading": {"symbol_aliases": ["format_search_results_md"], "accept_file_only_partial": 0.5},
+      "explanation": "axis_search が返す Markdown を組み立てる。JSON版は format_search_results_json。"
+    },
+    {
+      "id": "q_df_ingest", "difficulty": "L3", "type": "dataflow", "module": "backend/src/api.py", "tags": ["live-ingest", "pipeline"],
+      "prompt": "POST /api/ingest/memo で送ったメモが検索可能になるまでの主要ステップを順に並べよ（候補: post_ingest_memo, _resolve_memo_path, ファイル書き込み, live_ingest(chunk→embed→upsert)）。",
+      "citation": {"file": "backend/src/api.py", "symbol": {"kind": "function", "name": "post_ingest_memo"},
+        "evidence_substring": "_resolve_memo_path",
+        "adr_ref": null,
+        "snippet": "async def post_ingest_memo(req):\n    path = _resolve_memo_path(req, knowledge_dir)\n    path.write_text(markdown)\n    _live_ingest_path(path)   # chunk -> embed -> upsert into Chroma (no rebuild)"},
+      "answer": {"sequence": ["post_ingest_memo", "_resolve_memo_path", "write", "live_ingest"]},
+      "grading": {"mode": "subsequence", "pass_threshold": 0.66,
+        "aliases": [["post_ingest_memo", "endpoint", "受領"], ["_resolve_memo_path", "path", "パス解決"], ["write", "書き込み", "保存", "write_text"], ["live_ingest", "_live_ingest_path", "chunk", "embed", "upsert", "索引"]]},
+      "pool": ["_resolve_memo_path", "live_ingest", "post_ingest_memo", "write"],
+      "explanation": "受領→保存先パス解決→Markdown書き込み→live ingest（chunk→embed→Chromaにupsert、リビルド無し）で約1秒で検索可能に（spec_056）。"
+    },
+    {
+      "id": "q_df_chat", "difficulty": "L3", "type": "dataflow", "module": "backend/src/rag.py", "tags": ["conversational-rag", "pipeline"],
+      "prompt": "Conversational RAG（履歴付き）でフォローアップ質問に答えるまでの主要ステップを順に並べよ（候補: rewrite_question, engine.search, build_context, generate, 履歴保存）。",
+      "citation": {"file": "backend/src/rag.py", "symbol": {"kind": "method", "name": "RAGPipeline.chat"},
+        "evidence_substring": "rewrite_question",
+        "adr_ref": "ADR-018",
+        "snippet": "def chat(self, question, session_id):\n    standalone = rewrite_question(history, question)\n    results = self._engine.search(standalone)\n    context = build_context(results)\n    text = self._call_generation(...)  # original question used for generation\n    store.append(session_id, ...)"},
+      "answer": {"sequence": ["rewrite_question", "search", "build_context", "generate", "append"]},
+      "grading": {"mode": "subsequence", "pass_threshold": 0.6,
+        "aliases": [["rewrite_question", "rewrite", "書き換え", "standalone"], ["search", "engine.search", "検索"], ["build_context", "context", "文脈"], ["generate", "生成", "llm"], ["append", "履歴保存", "保存", "store", "conversation"]]},
+      "pool": ["build_context", "rewrite_question", "append", "search", "generate"],
+      "explanation": "follow-upを standalone に書き換え→検索→文脈構築→（元質問で）生成→履歴に保存。検索は書き換え後、生成は元質問。"
+    },
+    {
+      "id": "q_rev_003", "difficulty": "L2", "type": "freetext", "module": "backend/src/api.py", "tags": ["reverse", "startup"],
+      "prompt": "次のコードの役割を一文で説明せよ:\n\n    @asynccontextmanager\n    async def lifespan(app):\n        # build graph, engine, stores\n        yield\n        # dispose",
+      "citation": {"file": "backend/src/api.py", "symbol": {"kind": "function", "name": "lifespan"},
+        "evidence_substring": "build graph, engine, stores",
+        "adr_ref": null,
+        "snippet": "@asynccontextmanager\nasync def lifespan(app): # build graph, engine, stores at startup; yield; dispose at shutdown"},
+      "answer": {"model_answer": "FastAPI 起動時にグラフ・検索エンジン・各ストアを1度だけ構築し、終了時に後始末する起動/終了フック。",
+        "required_keywords": [{"any_of": ["起動", "startup", "立ち上げ", "開始"]}, {"any_of": ["1度", "一度", "1回", "once", "初期化", "構築"]}, {"any_of": ["グラフ", "エンジン", "ストア", "engine", "store"]}],
+        "forbidden_keywords": []},
+      "grading": {"min_keyword_coverage": 0.66},
+      "explanation": "逆向き問題：lifespan＝起動時1回の初期化＋終了時後始末、という役割を言語化させる。"
+    },
+    {
+      "id": "q_rev_004", "difficulty": "L2", "type": "freetext", "module": "frontend/src/lib/graphClient.ts", "tags": ["reverse", "graphrag"],
+      "prompt": "次の型の in_degree / out_degree は何を表すか説明せよ:\n\n    interface GraphNode { id; title; axes; in_degree; out_degree }",
+      "citation": {"file": "frontend/src/lib/graphClient.ts", "symbol": {"kind": "interface", "name": "GraphNode"},
+        "evidence_substring": "in_degree",
+        "adr_ref": "ADR-024",
+        "snippet": "export interface GraphNode { id: string; title: string; axes; in_degree: number; out_degree: number }"},
+      "answer": {"model_answer": "in_degree=その文書が他から参照されている数（被参照/入次数）、out_degree=その文書が refs で参照している数（参照/出次数）。",
+        "required_keywords": [{"any_of": ["入次数", "被参照", "参照されている", "in"]}, {"any_of": ["出次数", "参照している", "refs", "out"]}, {"any_of": ["参照", "リンク", "辺", "エッジ", "edge"]}],
+        "forbidden_keywords": []},
+      "grading": {"min_keyword_coverage": 0.66},
+      "explanation": "逆向き問題：有向グラフの入次数/出次数＝被参照数/参照数。ノードサイズ(val)にも使われる。"
+    }
+  ]
+}

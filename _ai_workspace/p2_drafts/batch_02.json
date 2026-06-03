@@ -1,0 +1,114 @@
+{
+  "batch": "02",
+  "modules": ["api.py", "evaluation/judge.py", "evaluation/run_ragas.py", "evaluation/stats.py"],
+  "questions": [
+    {
+      "id": "q_api_001", "difficulty": "L1", "type": "location", "module": "backend/src/api.py", "tags": ["api", "live-ingest"],
+      "prompt": "メモを受け取り live ingest を起動する HTTP エンドポイント関数は？（ファイルとシンボル）",
+      "citation": {"file": "backend/src/api.py", "symbol": {"kind": "function", "name": "post_ingest_memo"},
+        "evidence_substring": "async def post_ingest_memo",
+        "adr_ref": null,
+        "snippet": "@app.post(\"/api/ingest/memo\", response_model=MemoIngestResponse)\nasync def post_ingest_memo(req: MemoIngestRequest, ...): ..."},
+      "answer": {"file": "backend/src/api.py", "symbol": "post_ingest_memo"},
+      "grading": {"symbol_aliases": ["post_ingest_memo"], "accept_file_only_partial": 0.5},
+      "explanation": "POST /api/ingest/memo のハンドラ。MCP の axis_ingest_memo もこの経路に繋がる（spec_056）。"
+    },
+    {
+      "id": "q_api_002", "difficulty": "L2", "type": "mcq", "module": "backend/src/api.py", "tags": ["api", "startup"],
+      "prompt": "FastAPI 起動時に1度だけグラフ・検索エンジン・各ストアを構築する仕組みは？",
+      "citation": {"file": "backend/src/api.py", "symbol": {"kind": "function", "name": "lifespan"},
+        "evidence_substring": "async def lifespan",
+        "adr_ref": null,
+        "snippet": "@asynccontextmanager\nasync def lifespan(app: FastAPI) -> AsyncIterator[None]:\n    # build graph / engine / stores once at startup, dispose at shutdown"},
+      "answer": {"options": ["各リクエストで毎回構築する", "@asynccontextmanager の lifespan で起動時に1度構築する", "モジュールimport時のグローバルで構築する", "フロントエンドが構築する"], "correct_index": 1},
+      "explanation": "lifespan（asynccontextmanager）で起動時に重い初期化を1回だけ行い、shutdownで後始末。"
+    },
+    {
+      "id": "q_api_003", "difficulty": "L1", "type": "location", "module": "backend/src/api.py", "tags": ["api", "security"],
+      "prompt": "ingest トークン（X-Axis-Token）を検証する関数は？（ファイルとシンボル）",
+      "citation": {"file": "backend/src/api.py", "symbol": {"kind": "function", "name": "_require_ingest_token"},
+        "evidence_substring": "def _require_ingest_token",
+        "adr_ref": null,
+        "snippet": "def _require_ingest_token(x_axis_token: str | None) -> None:\n    # compare against AXIS_INGEST_TOKEN env; 401 on mismatch"},
+      "answer": {"file": "backend/src/api.py", "symbol": "_require_ingest_token"},
+      "grading": {"symbol_aliases": ["_require_ingest_token"], "accept_file_only_partial": 0.5},
+      "explanation": "AXIS_INGEST_TOKEN と X-Axis-Token を照合。未設定時は v0.8 互換で無認証許容。"
+    },
+    {
+      "id": "q_api_004", "difficulty": "L4", "type": "mcq", "module": "README.md", "tags": ["api", "security", "design"],
+      "prompt": "AXIS_INGEST_TOKEN が未設定のとき、POST /api/ingest の挙動は？",
+      "citation": {"file": "README.md", "symbol": {"kind": "section", "name": "Security note"},
+        "evidence_substring": "v0.8 互換 (無認証許容)",
+        "adr_ref": null,
+        "snippet": "`AXIS_INGEST_TOKEN` が未設定の場合は v0.8 互換 (無認証許容)。127.0.0.1 で動かす限りは問題ないが、LAN越し/外部公開時は必ず設定する。"},
+      "answer": {"options": ["常に401で拒否", "v0.8 互換で無認証許容（ローカル前提、外部公開時は要設定）", "サーバ起動を停止する", "ランダムトークンを自動生成"], "correct_index": 1},
+      "explanation": "ローカル(127.0.0.1)前提なら無認証でOK。外部公開時のみトークン必須、という段階的セキュリティ設計。"
+    },
+    {
+      "id": "q_api_005", "difficulty": "L3", "type": "dataflow", "module": "backend/src/api.py", "tags": ["api", "pipeline"],
+      "prompt": "POST /api/search がレスポンスを返すまでの主要ステップを順に並べよ（候補: searchエンドポイント, engine.search, _to_payload, SearchResponse）。",
+      "citation": {"file": "backend/src/api.py", "symbol": {"kind": "function", "name": "search"},
+        "evidence_substring": "_to_payload",
+        "adr_ref": null,
+        "snippet": "async def search(req: SearchRequest) -> SearchResponse:\n    results = engine.search(req.query, filters=req.filters, top_k=req.top_k, ...)\n    return SearchResponse(results=[_to_payload(r) for r in results])"},
+      "answer": {"sequence": ["search", "engine.search", "_to_payload", "SearchResponse"]},
+      "grading": {"mode": "subsequence", "pass_threshold": 0.75,
+        "aliases": [["search", "エンドポイント", "endpoint"], ["engine.search", "searchengine", "検索エンジン", "engine"], ["_to_payload", "payload", "変換"], ["searchresponse", "response", "レスポンス"]]},
+      "pool": ["_to_payload", "SearchResponse", "search", "engine.search"],
+      "explanation": "エンドポイントが SearchEngine.search を呼び、SearchResult を _to_payload で API 用に変換して SearchResponse に詰める。"
+    },
+    {
+      "id": "q_eval_001", "difficulty": "L2", "type": "mcq", "module": "evaluation/judge.py", "tags": ["evaluation", "ragas"],
+      "prompt": "evaluation/judge.py の役割は？",
+      "citation": {"file": "evaluation/judge.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "ragas LLM judge",
+        "adr_ref": "ADR-019",
+        "snippet": "Gemini 1.5 Flash adapter for ragas LLM judge.\ndef get_judge_llm() -> BaseChatModel: ..."},
+      "answer": {"options": ["検索インデックスを作る", "ragas 評価の LLM judge として Gemini Flash を供給するアダプタ", "フロントの状態管理", "DBマイグレーション"], "correct_index": 1},
+      "explanation": "RAGAS（RAG品質自動評価）が使う judge LLM/embeddings に Gemini Flash を差し込むアダプタ。"
+    },
+    {
+      "id": "q_eval_002", "difficulty": "L1", "type": "location", "module": "evaluation/stats.py", "tags": ["evaluation", "stats"],
+      "prompt": "RAGAS スコアの A/B 比較で「対応のある t 検定」を行う関数は？（ファイルとシンボル）",
+      "citation": {"file": "evaluation/stats.py", "symbol": {"kind": "function", "name": "paired_t_test"},
+        "evidence_substring": "def paired_t_test",
+        "adr_ref": null,
+        "snippet": "@dataclass(frozen=True)\nclass TTestResult: ...\ndef paired_t_test(scores_a, scores_b): # paired t-test for A/B metric comparison"},
+      "answer": {"file": "evaluation/stats.py", "symbol": "paired_t_test"},
+      "grading": {"symbol_aliases": ["paired_t_test"], "accept_file_only_partial": 0.5},
+      "explanation": "施策A/Bのスコア差が統計的に有意かを対応のあるt検定で判定（TTestResultを返す）。"
+    },
+    {
+      "id": "q_eval_003", "difficulty": "L1", "type": "location", "module": "evaluation/run_ragas.py", "tags": ["evaluation", "ragas"],
+      "prompt": "RAGAS 評価を実行するエントリポイント関数は？（ファイルとシンボル）",
+      "citation": {"file": "evaluation/run_ragas.py", "symbol": {"kind": "function", "name": "main"},
+        "evidence_substring": "def main",
+        "adr_ref": "ADR-019",
+        "snippet": "def main() -> int:\n    # build pipeline, build_dataset, run ragas, compare to baseline, maybe update"},
+      "answer": {"file": "evaluation/run_ragas.py", "symbol": "main"},
+      "grading": {"symbol_aliases": ["main", "run_pipeline"], "accept_file_only_partial": 0.6},
+      "explanation": "python -m evaluation.run_ragas のエントリ。dataset構築→ragas実行→baseline比較→（任意）更新。"
+    },
+    {
+      "id": "q_eval_004", "difficulty": "L2", "type": "location", "module": "evaluation/run_ragas.py", "tags": ["evaluation", "regression"],
+      "prompt": "ベースラインと比較してスコアの退行（regression）を判定する関数は？（ファイルとシンボル）",
+      "citation": {"file": "evaluation/run_ragas.py", "symbol": {"kind": "function", "name": "_check_regression"},
+        "evidence_substring": "def _check_regression",
+        "adr_ref": "ADR-019",
+        "snippet": "def _check_regression(current, baseline, ...): # fail if metrics dropped beyond tolerance vs baseline.json"},
+      "answer": {"file": "evaluation/run_ragas.py", "symbol": "_check_regression"},
+      "grading": {"symbol_aliases": ["_check_regression"], "accept_file_only_partial": 0.5},
+      "explanation": "baseline.json比で許容超の低下があればCIをfailさせ、品質退行のマージを止める。"
+    },
+    {
+      "id": "q_eval_005", "difficulty": "L4", "type": "mcq", "module": "evaluation/run_ragas.py", "tags": ["evaluation", "design"],
+      "prompt": "evaluation/baseline.json を保持し毎回比較する設計の狙いは？",
+      "citation": {"file": "evaluation/run_ragas.py", "symbol": {"kind": "module", "name": "usage docstring"},
+        "evidence_substring": "--update-baseline",
+        "adr_ref": "ADR-019",
+        "snippet": "Usage: python -m evaluation.run_ragas --dataset ... --baseline evaluation/baseline.json --output ... --update-baseline"},
+      "answer": {"options": ["デプロイを速くするため", "過去スコアを基準に固定し、変更で RAG 品質が退行していないか自動で検知するため", "APIキーを保存するため", "フロントのキャッシュ用"], "correct_index": 1},
+      "explanation": "RAG は変更で静かに精度が落ちやすい。baseline固定＋regression検知で“質を測りながら”改善する。"
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "batch": "01",
+  "modules": ["feedback.py", "gap_detection.py", "marker.py", "parent_storage.py", "reverse"],
+  "questions": [
+    {
+      "id": "q_fb_001", "difficulty": "L2", "type": "mcq", "module": "backend/src/feedback.py", "tags": ["feedback", "active-learning"],
+      "prompt": "feedback.py が記録しているものは？",
+      "citation": {"file": "backend/src/feedback.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "Tracks 👍/👎 signals",
+        "adr_ref": "ADR-028",
+        "snippet": "User feedback storage for active learning (spec_047). Tracks 👍/👎 signals on search results / chat answers, plus the originating query, doc_id, session_id, and timestamp."},
+      "answer": {"options": ["検索のレイテンシ", "回答/検索結果への 👍/👎 と元クエリ・doc_id・session_id・時刻", "LLMのトークン使用量", "ユーザーのログイン履歴"], "correct_index": 1},
+      "explanation": "active learning 用に 👍/👎 シグナルと文脈（query/doc_id/session_id/timestamp）を記録。集計は evaluation/feedback_report.py。"
+    },
+    {
+      "id": "q_fb_002", "difficulty": "L4", "type": "mcq", "module": "backend/src/feedback.py", "tags": ["feedback", "design"],
+      "prompt": "FeedbackStore を Protocol にしている設計意図は？",
+      "citation": {"file": "backend/src/feedback.py", "symbol": {"kind": "class", "name": "FeedbackStore"},
+        "evidence_substring": "without breaking call sites",
+        "adr_ref": "ADR-028",
+        "snippet": "Keeping the store behind a small FeedbackStore Protocol leaves room for a PostgreSQL / Redis backend later without breaking call sites."},
+      "answer": {"options": ["テストを速くするため", "後で PostgreSQL/Redis バックエンドに差し替えても呼び出し側を壊さないため", "型チェックを無効化するため", "sqlite を禁止するため"], "correct_index": 1},
+      "explanation": "Protocol で実装を抽象化＝将来のバックエンド差し替えに対して呼び出し側非破壊。MVPは logging のみ（自動重み調整は v0.10）。"
+    },
+    {
+      "id": "q_fb_003", "difficulty": "L1", "type": "location", "module": "backend/src/feedback.py", "tags": ["feedback"],
+      "prompt": "フィードバックを sqlite に永続化する実装クラスはどれ？（ファイルとシンボル）",
+      "citation": {"file": "backend/src/feedback.py", "symbol": {"kind": "class", "name": "SqliteFeedbackStore"},
+        "evidence_substring": "class SqliteFeedbackStore",
+        "adr_ref": null,
+        "snippet": "class SqliteFeedbackStore:\n    def __init__(self, db_path: str = \"~/.axis_feedback.db\") -> None: ..."},
+      "answer": {"file": "backend/src/feedback.py", "symbol": "SqliteFeedbackStore"},
+      "grading": {"symbol_aliases": ["SqliteFeedbackStore"], "accept_file_only_partial": 0.5},
+      "explanation": "SqliteFeedbackStore が FeedbackStore Protocol の sqlite 実装。make_feedback_store がconfigで生成。"
+    },
+    {
+      "id": "q_gap_001", "difficulty": "L2", "type": "mcq", "module": "backend/src/gap_detection.py", "tags": ["gap-detection"],
+      "prompt": "gap_detection が記録するナレッジギャップの3種類は？",
+      "citation": {"file": "backend/src/gap_detection.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "llm_no_info",
+        "adr_ref": "ADR-029",
+        "snippet": "no_results — search returned an empty hit list.\nlow_score — top hit fell below gap.low_score_threshold.\nllm_no_info — the LLM answered 資料に記載がありません or similar."},
+      "answer": {"options": ["error / warning / info", "no_results / low_score / llm_no_info", "timeout / empty / slow", "404 / 500 / 503"], "correct_index": 1},
+      "explanation": "無結果 / 上位スコア低 / LLMが情報なしと回答、の3イベントを記録。集計は evaluation/gap_report.py。"
+    },
+    {
+      "id": "q_gap_002", "difficulty": "L1", "type": "location", "module": "backend/src/gap_detection.py", "tags": ["gap-detection"],
+      "prompt": "回答文が「資料に記載がありません」等の情報なし応答かを判定する関数は？（ファイルとシンボル）",
+      "citation": {"file": "backend/src/gap_detection.py", "symbol": {"kind": "function", "name": "detect_no_info"},
+        "evidence_substring": "def detect_no_info",
+        "adr_ref": null,
+        "snippet": "def detect_no_info(answer_text: str | None) -> bool:\n    # True if the LLM said 資料に記載がありません or similar"},
+      "answer": {"file": "backend/src/gap_detection.py", "symbol": "detect_no_info"},
+      "grading": {"symbol_aliases": ["detect_no_info"], "accept_file_only_partial": 0.5},
+      "explanation": "detect_no_info が llm_no_info ギャップの判定に使われる。"
+    },
+    {
+      "id": "q_marker_001", "difficulty": "L2", "type": "mcq", "module": "backend/src/marker.py", "tags": ["marker"],
+      "prompt": "AUTO_GENERATED マーカーブロックの役割は？",
+      "citation": {"file": "backend/src/marker.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "preserving everything else",
+        "adr_ref": null,
+        "snippet": "Allows human-written Markdown and AI-generated sections to coexist. Regenerating a block overwrites only the content between its delimiters, preserving everything else (= the human-written part)."},
+      "answer": {"options": ["全文をAIで上書きする", "人間が書いた部分とAI生成部分を共存させ、再生成は区切り間だけ上書きする", "Markdownを禁止する", "コメントを全削除する"], "correct_index": 1},
+      "explanation": "人手とAI生成を1ファイルで共存。区切り（START/END）間だけ差し替え、人間の記述は保全。"
+    },
+    {
+      "id": "q_marker_002", "difficulty": "L1", "type": "location", "module": "backend/src/marker.py", "tags": ["marker"],
+      "prompt": "指定ブロックの中身だけを上書きする関数は？（ファイルとシンボル）",
+      "citation": {"file": "backend/src/marker.py", "symbol": {"kind": "function", "name": "update_block"},
+        "evidence_substring": "def update_block",
+        "adr_ref": null,
+        "snippet": "def update_block(text: str, name: str, new_content: str) -> str:\n    # overwrite only the content between this block's delimiters"},
+      "answer": {"file": "backend/src/marker.py", "symbol": "update_block"},
+      "grading": {"symbol_aliases": ["update_block", "extract_blocks"], "accept_file_only_partial": 0.5},
+      "explanation": "update_block が区切り間のみ置換。extract_blocks/validate_balance/strip_blocks も同モジュール。"
+    },
+    {
+      "id": "q_marker_003", "difficulty": "L2", "type": "fill_blank", "module": "backend/src/marker.py", "tags": ["marker"],
+      "prompt": "ブロック開始の区切りコメントの形式の空欄を埋めよ:\n    <!-- ____: <name> -->",
+      "citation": {"file": "backend/src/marker.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "AUTO_GENERATED_START",
+        "adr_ref": null,
+        "snippet": "Blocks are delimited by:\n    <!-- AUTO_GENERATED_START: <name> -->\n    ...\n    <!-- AUTO_GENERATED_END: <name> -->"},
+      "answer": {"accepted": ["AUTO_GENERATED_START"]},
+      "grading": {"casefold": true},
+      "explanation": "開始 AUTO_GENERATED_START / 終了 AUTO_GENERATED_END で name 付きブロックを画定。"
+    },
+    {
+      "id": "q_ps_001", "difficulty": "L2", "type": "mcq", "module": "backend/src/parent_storage.py", "tags": ["parent-doc", "storage"],
+      "prompt": "ParentStorage の2実装は？",
+      "citation": {"file": "backend/src/parent_storage.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "JsonParentStorage",
+        "adr_ref": "ADR-023",
+        "snippet": "Two implementations:\n- SqliteParentStorage (v0.8 default): file-backed sqlite, lazy SELECT per parent_id\n- JsonParentStorage (v0.7 fallback): full-JSON load at init."},
+      "answer": {"options": ["Redis / Memcached", "SqliteParentStorage（既定） / JsonParentStorage（後方互換）", "Chroma / FAISS", "Postgres / MySQL"], "correct_index": 1},
+      "explanation": "v0.8 既定は sqlite（parent_id 単位の遅延SELECT）、v0.7 互換の JSON 全ロードも残す。"
+    },
+    {
+      "id": "q_ps_002", "difficulty": "L4", "type": "mcq", "module": "backend/src/parent_storage.py", "tags": ["parent-doc", "design"],
+      "prompt": "parent 保存を JSON 全ロードから sqlite の遅延SELECTへ移行した利点は？",
+      "citation": {"file": "backend/src/parent_storage.py", "symbol": {"kind": "class", "name": "SqliteParentStorage"},
+        "evidence_substring": "lazy SELECT per parent_id",
+        "adr_ref": "ADR-023",
+        "snippet": "SqliteParentStorage (v0.8 default): file-backed sqlite, lazy SELECT per parent_id. JsonParentStorage (v0.7 fallback): full-JSON load at init."},
+      "answer": {"options": ["JSONの方が速い", "起動時に全parentをメモリ展開せず、必要なparent_idだけ都度SELECTできる", "暗号化のため", "Chroma必須のため"], "correct_index": 1},
+      "explanation": "全ロード（起動コスト・メモリ）を避け、検索ヒットしたparentだけ遅延取得。spec_037の進化。"
+    },
+    {
+      "id": "q_rev_001", "difficulty": "L2", "type": "freetext", "module": "backend/src/gap_detection.py", "tags": ["reverse", "gap-detection"],
+      "prompt": "次のコードの役割を一文で説明せよ:\n\n    def detect_no_info(answer_text: str | None) -> bool:\n        # returns True when the LLM answer indicates it has no info\n        # e.g. '資料に記載がありません'",
+      "citation": {"file": "backend/src/gap_detection.py", "symbol": {"kind": "function", "name": "detect_no_info"},
+        "evidence_substring": "no info",
+        "adr_ref": null,
+        "snippet": "def detect_no_info(answer_text): # returns True when the LLM answer indicates it has no info (資料に記載がありません 等)"},
+      "answer": {"model_answer": "LLMの回答が『情報がない/資料に記載がない』旨かを判定し、llm_no_info ギャップ検出に使う関数。",
+        "required_keywords": [{"any_of": ["llm", "回答", "answer", "応答"]}, {"any_of": ["情報がない", "記載がない", "no info", "情報なし", "資料"]}, {"any_of": ["判定", "検出", "true", "ギャップ", "gap"]}],
+        "forbidden_keywords": []},
+      "grading": {"min_keyword_coverage": 0.66},
+      "explanation": "逆向き問題：コードを見て役割を言語化。これが llm_no_info ギャップ判定の核。"
+    },
+    {
+      "id": "q_rev_002", "difficulty": "L2", "type": "freetext", "module": "backend/src/marker.py", "tags": ["reverse", "marker"],
+      "prompt": "次の関数の役割を一文で説明せよ:\n\n    def update_block(text, name, new_content):\n        # find <!-- AUTO_GENERATED_START: name --> .. END\n        # replace only the inside, keep the rest",
+      "citation": {"file": "backend/src/marker.py", "symbol": {"kind": "function", "name": "update_block"},
+        "evidence_substring": "replace only the inside",
+        "adr_ref": null,
+        "snippet": "def update_block(text, name, new_content): # find AUTO_GENERATED_START:name .. END, replace only the inside, keep the rest"},
+      "answer": {"model_answer": "指定名のAUTO_GENERATEDブロックの区切り間だけを new_content で置換し、他（人間記述）は保持する関数。",
+        "required_keywords": [{"any_of": ["ブロック", "block", "区切り", "delimiter", "auto_generated"]}, {"any_of": ["置換", "上書き", "replace", "差し替え"]}, {"any_of": ["他", "残り", "保持", "preserve", "keep", "人間"]}],
+        "forbidden_keywords": []},
+      "grading": {"min_keyword_coverage": 0.66},
+      "explanation": "逆向き問題：区切り間だけ置換・他保全という marker の中核挙動を言語化させる。"
+    }
+  ]
+}
