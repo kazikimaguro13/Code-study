@@ -38,6 +38,12 @@ class CitationView(BaseModel):
     symbol: Any = None
     adr_ref: str | None = None
     snippet: str | None = None
+    # Real source resolved live from the target repo (None for ADR/README
+    # sections or when the repo isn't available — UI falls back to snippet).
+    source: str | None = None
+    resolved: bool = False
+    start_line: int | None = None
+    end_line: int | None = None
 
 
 class GradeResponse(BaseModel):

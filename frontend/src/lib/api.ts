@@ -20,6 +20,10 @@ export interface CitationView {
   symbol: unknown;
   adr_ref: string | null;
   snippet: string | null;
+  source: string | null;
+  resolved: boolean;
+  start_line: number | null;
+  end_line: number | null;
 }
 
 export interface GradeResult {

@@ -34,6 +34,9 @@ app = FastAPI(title="axis-code-quiz", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    # Allow localhost/127.0.0.1 on ANY port so a shifted dev port (3001, …)
+    # doesn't get blocked by CORS.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -46,8 +49,12 @@ def get_service() -> QuizService:
     if _service is None:
         bank = QuizBank.load(settings.quiz_bank_path)
         progress = ProgressStore(settings.progress_db_path)
-        _service = QuizService(bank, progress)
-        logger.info("Loaded quiz_bank: %d questions", len(bank))
+        _service = QuizService(bank, progress, target_repo=settings.target_repo)
+        logger.info(
+            "Loaded quiz_bank: %d questions (target_repo=%s)",
+            len(bank),
+            settings.target_repo,
+        )
     return _service
 
 

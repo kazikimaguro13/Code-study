@@ -11,8 +11,10 @@ registry. The selection policy implements the spec:
 from __future__ import annotations
 
 import random
+from pathlib import Path
 from typing import Any
 
+from backend.src.anchor import resolver as anchor_resolver
 from backend.src.grading.registry import GraderRegistry
 from backend.src.store.progress import ProgressStore
 from backend.src.store.quiz_bank import QuizBank
@@ -26,11 +28,13 @@ class QuizService:
         registry: GraderRegistry | None = None,
         *,
         rng: random.Random | None = None,
+        target_repo: Path | None = None,
     ) -> None:
         self.bank = bank
         self.progress = progress
         self.registry = registry or GraderRegistry()
         self._rng = rng or random.Random()
+        self._target_repo = target_repo
 
     # ---- selection -------------------------------------------------
     def next_questions(self, n: int = 10, *, module: str | None = None) -> list[dict]:
@@ -76,6 +80,17 @@ class QuizService:
         self.progress.record_attempt(q_id, result.score, result.correct)
         srs = self.progress.srs_state(q_id) or {}
         citation = q.get("citation", {})
+
+        # Resolve the real, full source from the target repo (axis) so the
+        # learner sees the actual code behind the question. Falls back to the
+        # bundled snippet for ADR/README sections or when the repo is absent.
+        real: dict[str, Any] = {"found": False}
+        if self._target_repo is not None:
+            try:
+                real = anchor_resolver.resolve_citation(self._target_repo, citation)
+            except Exception:  # noqa: BLE001 — never let source resolution break grading
+                real = {"found": False}
+
         return {
             "q_id": q_id,
             "score": result.score,
@@ -90,6 +105,10 @@ class QuizService:
                 "symbol": citation.get("symbol"),
                 "adr_ref": citation.get("adr_ref"),
                 "snippet": citation.get("snippet", ""),
+                "source": real.get("source") if real.get("found") else None,
+                "resolved": bool(real.get("found")),
+                "start_line": real.get("start"),
+                "end_line": real.get("end"),
             },
             "next_due": srs.get("due_date"),
             "correct_streak": srs.get("correct_streak"),

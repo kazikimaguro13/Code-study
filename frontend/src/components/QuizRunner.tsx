@@ -47,7 +47,7 @@ export function QuizRunner({ title, sessionSize = 8 }: { title: string; sessionS
   function next() {
     setResult(null);
     if (idx + 1 < queue.length) setIdx(idx + 1);
-    else load(); // fetch a fresh session
+    else load();
   }
 
   if (loading) return <p className="text-slate-500">読み込み中…</p>;
@@ -70,7 +70,7 @@ export function QuizRunner({ title, sessionSize = 8 }: { title: string; sessionS
         </span>
       </div>
       <QuestionCard q={q} disabled={result !== null} onSubmit={submit} />
-      {result && <ResultReveal result={result} onNext={next} />}
+      {result && <ResultReveal result={result} prompt={q.prompt} onNext={next} />}
     </div>
   );
 }
