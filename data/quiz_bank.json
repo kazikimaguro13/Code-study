@@ -3149,6 +3149,849 @@
         "min_keyword_coverage": 0.66
       },
       "explanation": "逆向き問題：有向グラフの入次数/出次数＝被参照数/参照数。ノードサイズ(val)にも使われる。"
+    },
+    {
+      "id": "q_ing_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/ingester.py",
+      "tags": [
+        "ingester"
+      ],
+      "prompt": "ingester.py の役割は？",
+      "citation": {
+        "file": "backend/src/ingester.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "raw text → axis-knowledge-rag YAML frontmatter Markdown",
+        "adr_ref": null,
+        "snippet": "AI-powered ingester: raw text → axis-knowledge-rag YAML frontmatter Markdown.\nReuses the Claude API client pattern from rag.py."
+      },
+      "answer": {
+        "options": [
+          "ベクトル索引の構築",
+          "生テキストをAIで YAML frontmatter付きMarkdown に変換する",
+          "APIの認証",
+          "グラフ描画"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "Slack抜粋・議事録などの生メモを、axis のナレッジ形式（YAML+Markdown）へAI変換する入口。"
+    },
+    {
+      "id": "q_ing_002",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "backend/src/ingester.py",
+      "tags": [
+        "ingester",
+        "design"
+      ],
+      "prompt": "ANTHROPIC_API_KEY 未設定時の Ingester の挙動と、その設計意図は？",
+      "citation": {
+        "file": "backend/src/ingester.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "falls back to a deterministic mock",
+        "adr_ref": null,
+        "snippet": "When ANTHROPIC_API_KEY is not set (or force_dummy=True), falls back to a deterministic mock so the CLI and tests run offline."
+      },
+      "answer": {
+        "options": [
+          "例外を投げて停止する",
+          "決定的なモックにフォールバックし、CLI/テストがオフラインで動くようにする",
+          "Geminiに自動切替する",
+          "空ファイルを出力する"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "embedder の DUMMY と同じ思想：キー無しでも構造確認・CI が回る。決定的＝テストが安定。"
+    },
+    {
+      "id": "q_ing_003",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "backend/src/ingester.py",
+      "tags": [
+        "ingester"
+      ],
+      "prompt": "knowledge ディレクトリを見て次の doc ID を採番する関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/ingester.py",
+        "symbol": {
+          "kind": "function",
+          "name": "_next_doc_id"
+        },
+        "evidence_substring": "def _next_doc_id",
+        "adr_ref": null,
+        "snippet": "def _next_doc_id(knowledge_dir: Path) -> str:\n    # scan existing doc_NNN ids and return the next one",
+        "source": "def _next_doc_id(knowledge_dir: Path) -> str:\n    \"\"\"Back-compat wrapper that returns only the next id from `_scan_knowledge_dir`.\"\"\"\n    return _scan_knowledge_dir(knowledge_dir)[0]",
+        "start_line": 79,
+        "end_line": 81
+      },
+      "answer": {
+        "file": "backend/src/ingester.py",
+        "symbol": "_next_doc_id"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "_next_doc_id",
+          "next_doc_id"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "_scan_knowledge_dir / _existing_doc_ids と連携して doc_011 のような連番を払い出す。"
+    },
+    {
+      "id": "q_web_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/ingest_web.py",
+      "tags": [
+        "browser-extension",
+        "ingest"
+      ],
+      "prompt": "ingest_web.py（POST /api/ingest の裏側）は何をどう保存する？",
+      "citation": {
+        "file": "backend/src/ingest_web.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "web_YYYYMMDD_HHMMSS",
+        "adr_ref": "ADR-027",
+        "snippet": "the browser extension sends URL + title + body (and optionally a user-selected snippet), and we persist a new examples/knowledge/web_YYYYMMDD_HHMMSS_<slug>.md file that the existing indexer can pick up untouched."
+      },
+      "answer": {
+        "options": [
+          "DBに直接INSERTする",
+          "拡張から来た URL+title+body を web_日時_<slug>.md として knowledge ディレクトリに保存する",
+          "S3にアップロードする",
+          "メモリにのみ保持"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "ファイルとして置くだけで既存のインデクサがそのまま拾える、という疎結合な設計（spec_046）。"
+    },
+    {
+      "id": "q_web_002",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "backend/src/ingest_web.py",
+      "tags": [
+        "browser-extension"
+      ],
+      "prompt": "キャプチャしたWebページをYAML+Markdownとして書き出す本体関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/ingest_web.py",
+        "symbol": {
+          "kind": "function",
+          "name": "save_web_page"
+        },
+        "evidence_substring": "def save_web_page",
+        "adr_ref": "ADR-027",
+        "snippet": "def save_web_page(...):\n    # build frontmatter via _yaml_dump, slugify filename, write to knowledge dir",
+        "source": "def save_web_page(\n    *,\n    url: str,\n    title: str,\n    body: str,\n    selected_text: str | None = None,\n    knowledge_dir: str | Path = \"./examples/knowledge\",\n    now: datetime | None = None,\n) -> Path:\n    \"\"\"Persist a captured web page as a YAML-frontmatter Markdown file.\n\n    Filename: ``web_YYYYMMDD_HHMMSS_<slug>.md`` (UTC). ``selected_text``,\n    when provided and non-empty, takes priority over ``body`` so the user's\n    deliberate selection wins over the full-page dump.\n    \"\"\"\n\n    knowledge_dir = Path(knowledge_dir)\n    knowledge_dir.mkdir(parents=True, exist_ok=True)\n    captured_at = (now or datetime.now(UTC)).astimezone(UTC)\n    slug = _slugify(title or \"\")\n    fname = f\"web_{captured_at:%Y%m%d_%H%M%S}_{slug}.md\"\n    path = knowledge_dir / fname\n\n    selected = (selected_text or \"\").strip()\n    main_content = selected if selected else (body or \"\").strip()\n\n    frontmatter: dict[str, Any] = {\n        \"id\": path.stem,\n        \"title\": title,\n        \"source\": \"browser-extension\",\n        \"url\": url,\n        \"captured_at\": captured_at.isoformat(),\n        \"axes\": {\n            \"category\": \"Web\",\n            \"topic\": \"未分類\",\n            \"level\": \"中級\",\n        },\n        \"refs\": [],\n    }\n    fm = _yaml_dump(frontmatter)\n    md = f\"---\\n{fm}\\n---\\n\\n# {title}\\n\\nsource: {url}\\n\\n{main_content}\\n\"\n    path.write_text(md, encoding=\"utf-8\")\n    return path",
+        "start_line": 85,
+        "end_line": 127
+      },
+      "answer": {
+        "file": "backend/src/ingest_web.py",
+        "symbol": "save_web_page"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "save_web_page"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "_slugify / _yaml_dump を使ってファイル名とfrontmatterを組み立てて保存する。"
+    },
+    {
+      "id": "q_yml_001",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "scripts/yamlize.py",
+      "tags": [
+        "cli",
+        "ingester"
+      ],
+      "prompt": "生テキスト1ファイルをYAML付きMarkdownへ変換するCLI（python -m scripts.yamlize）の実装ファイルは？",
+      "citation": {
+        "file": "scripts/yamlize.py",
+        "symbol": {
+          "kind": "function",
+          "name": "main"
+        },
+        "evidence_substring": "python -m scripts.yamlize",
+        "adr_ref": null,
+        "snippet": "CLI: convert a single raw text file to YAML-frontmatter Markdown.\nUsage: python -m scripts.yamlize input.txt --suggested-category 議事録",
+        "source": "def main(argv: list[str]) -> int:\n    configure_logging()\n    p = argparse.ArgumentParser(description=\"raw text → YAML-frontmatter Markdown (axis-knowledge-rag)\")\n    p.add_argument(\"input\", help=\"Path to raw text file, or '-' for stdin\")\n    p.add_argument(\"--output\", \"-o\", help=\"Output Markdown file path. Default: stdout\")\n    p.add_argument(\"--knowledge-dir\", default=\"./examples/knowledge\")\n    p.add_argument(\"--suggested-category\", default=None)\n    p.add_argument(\"--max-tokens\", type=int, default=1500)\n    p.add_argument(\"--force-dummy\", action=\"store_true\", help=\"Force DUMMY mode even if ANTHROPIC_API_KEY is set\")\n    args = p.parse_args(argv[1:])\n\n    raw = sys.stdin.read() if args.input == \"-\" else Path(args.input).read_text(encoding=\"utf-8\")\n\n    opts = IngestOptions(\n        knowledge_dir=args.knowledge_dir,\n        suggested_category=args.suggested_category,\n        max_tokens=args.max_tokens,\n    )\n    ingester = Ingester(force_dummy=args.force_dummy)\n    result = ingester.ingest(raw, opts)\n    md = render_markdown(result)\n\n    if args.output:\n        Path(args.output).write_text(md, encoding=\"utf-8\")\n        print(\n            f\"[ok] wrote {args.output} (id={result.id}, title={result.title!r})\",\n            file=sys.stderr,\n        )\n    else:\n        sys.stdout.write(md)\n    return 0",
+        "start_line": 21,
+        "end_line": 51
+      },
+      "answer": {
+        "file": "scripts/yamlize.py",
+        "symbol": "main"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "main",
+          "yamlize"
+        ],
+        "accept_file_only_partial": 0.7
+      },
+      "explanation": "単発変換のCLI。バッチ版は scripts/yamlize_dir.py。中身は Ingester を呼ぶ薄いラッパ。"
+    },
+    {
+      "id": "q_sch_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/schemas.py",
+      "tags": [
+        "api",
+        "schema"
+      ],
+      "prompt": "backend/src/schemas.py の役割と、フロントエンドとの関係は？",
+      "citation": {
+        "file": "backend/src/schemas.py",
+        "symbol": {
+          "kind": "module",
+          "name": "module docstring"
+        },
+        "evidence_substring": "Pydantic schemas for the FastAPI layer",
+        "adr_ref": null,
+        "snippet": "Pydantic schemas for the FastAPI layer.\nclass SearchRequest(BaseModel): ...\nclass SearchResponse(BaseModel): ...  # frontend/src/lib/api.ts mirrors these types"
+      },
+      "answer": {
+        "options": [
+          "DBのテーブル定義",
+          "FastAPI のリクエスト/レスポンス型（Pydantic）。frontend の api.ts がこれをミラーする",
+          "CSSの型",
+          "テストのfixture"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "API境界の型を一元定義。フロントのTS型はこれを手動ミラーし、双方の契約を揃える。"
+    },
+    {
+      "id": "q_cfg_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/config.py",
+      "tags": [
+        "config"
+      ],
+      "prompt": "config.py の設定はどう構成されている？",
+      "citation": {
+        "file": "backend/src/config.py",
+        "symbol": {
+          "kind": "module",
+          "name": "dataclasses"
+        },
+        "evidence_substring": "@dataclass(frozen=True)",
+        "adr_ref": null,
+        "snippet": "@dataclass(frozen=True)\nclass ParentDocConfig: ...\n@dataclass(frozen=True)\nclass TimeDecayConfig: ...\n@dataclass(frozen=True)\nclass ChatConfig: ...\n@dataclass(frozen=True)\nclass GenerationConfig: ...  # 機能ごとの小さなconfigを AppConfig が束ねる"
+      },
+      "answer": {
+        "options": [
+          "1つの巨大dict",
+          "機能ごとの frozen dataclass（ParentDoc/TimeDecay/Chat/Generation等）を AppConfig が束ねる",
+          "環境変数のみ",
+          "XMLファイル"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "config.yml を _build_app_config が機能別の不変dataclassに詰める。型安全＋意図しない書き換え防止。"
+    },
+    {
+      "id": "q_cfg_002",
+      "difficulty": "L2",
+      "type": "fill_blank",
+      "module": "backend/src/config.py",
+      "tags": [
+        "config",
+        "python"
+      ],
+      "prompt": "設定dataclassを不変（書き換え不可）にしているデコレータ引数の空欄を埋めよ:\n    @dataclass(____=True)",
+      "citation": {
+        "file": "backend/src/config.py",
+        "symbol": {
+          "kind": "class",
+          "name": "ParentDocConfig"
+        },
+        "evidence_substring": "@dataclass(frozen=True)",
+        "adr_ref": null,
+        "snippet": "@dataclass(frozen=True)\nclass ParentDocConfig:",
+        "source": "class ParentDocConfig:\n    \"\"\"Settings for the small-to-big (parent / child) retrieval path.\"\"\"\n\n    enabled: bool = True\n    chunk_strategy: str = \"h2\"  # currently only \"h2\" is implemented\n    max_child_tokens: int = 256\n    top_k_children: int = 20\n    top_n_parents: int = 5\n    storage: str = \"sqlite\"  # spec_037: \"sqlite\" (default) | \"json\" (legacy v0.7)",
+        "start_line": 56,
+        "end_line": 64
+      },
+      "answer": {
+        "accepted": [
+          "frozen"
+        ]
+      },
+      "grading": {
+        "casefold": true
+      },
+      "explanation": "frozen=True で属性代入が例外に。設定が実行中に書き換わる事故を型レベルで防ぐ。"
+    },
+    {
+      "id": "q_integ_002",
+      "difficulty": "L2",
+      "type": "location",
+      "module": "backend/src/integrity.py",
+      "tags": [
+        "integrity",
+        "graph"
+      ],
+      "prompt": "refs の循環参照を検出する関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/integrity.py",
+        "symbol": {
+          "kind": "function",
+          "name": "_find_cycles"
+        },
+        "evidence_substring": "def _find_cycles",
+        "adr_ref": null,
+        "snippet": "def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:\n    \"\"\"Simple DFS cycle detection. Returns a list of cycle paths.\"\"\"",
+        "source": "def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:\n    \"\"\"Simple DFS cycle detection. Returns a list of cycle paths.\"\"\"\n    WHITE, GRAY, BLACK = 0, 1, 2\n    color: dict[str, int] = defaultdict(int)\n    cycles: list[list[str]] = []\n    stack: list[str] = []\n\n    def visit(node: str) -> None:\n        if color[node] == GRAY:\n            # Found cycle: rewind stack until we find node again\n            idx = stack.index(node)\n            cycles.append(stack[idx:] + [node])\n            return\n        if color[node] == BLACK:\n            return\n        color[node] = GRAY\n        stack.append(node)\n        for nxt in graph.get(node, []):\n            visit(nxt)\n        stack.pop()\n        color[node] = BLACK\n\n    for n in list(graph.keys()):\n        if color[n] == WHITE:\n            visit(n)\n    return cycles",
+        "start_line": 50,
+        "end_line": 75
+      },
+      "answer": {
+        "file": "backend/src/integrity.py",
+        "symbol": "_find_cycles"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "_find_cycles",
+          "find_cycles"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "IntegrityChecker.check が refs グラフに対して呼ぶ。DFSベースの循環検出。"
+    },
+    {
+      "id": "q_integ_003",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/integrity.py",
+      "tags": [
+        "integrity",
+        "algorithm"
+      ],
+      "prompt": "_find_cycles が使っているアルゴリズムは？",
+      "citation": {
+        "file": "backend/src/integrity.py",
+        "symbol": {
+          "kind": "function",
+          "name": "_find_cycles"
+        },
+        "evidence_substring": "WHITE, GRAY, BLACK = 0, 1, 2",
+        "adr_ref": null,
+        "snippet": "WHITE, GRAY, BLACK = 0, 1, 2\n# DFS: GRAY(訪問中)のノードに再訪したら循環。stackを巻き戻して循環パスを記録。",
+        "source": "def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:\n    \"\"\"Simple DFS cycle detection. Returns a list of cycle paths.\"\"\"\n    WHITE, GRAY, BLACK = 0, 1, 2\n    color: dict[str, int] = defaultdict(int)\n    cycles: list[list[str]] = []\n    stack: list[str] = []\n\n    def visit(node: str) -> None:\n        if color[node] == GRAY:\n            # Found cycle: rewind stack until we find node again\n            idx = stack.index(node)\n            cycles.append(stack[idx:] + [node])\n            return\n        if color[node] == BLACK:\n            return\n        color[node] = GRAY\n        stack.append(node)\n        for nxt in graph.get(node, []):\n            visit(nxt)\n        stack.pop()\n        color[node] = BLACK\n\n    for n in list(graph.keys()):\n        if color[n] == WHITE:\n            visit(n)\n    return cycles",
+        "start_line": 50,
+        "end_line": 75
+      },
+      "answer": {
+        "options": [
+          "BFSで最短経路",
+          "3色（WHITE/GRAY/BLACK）のDFS：訪問中(GRAY)ノードへの再訪＝循環",
+          "Union-Find",
+          "トポロジカルソートのみ"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "古典的な3色DFS。GRAY=現在の探索パス上、そこに戻ってきたら循環としてパスを記録。"
+    },
+    {
+      "id": "q_rev_005",
+      "difficulty": "L3",
+      "type": "freetext",
+      "module": "backend/src/integrity.py",
+      "tags": [
+        "reverse",
+        "algorithm"
+      ],
+      "prompt": "次のコードが何をしているか、GRAY の意味に触れつつ説明せよ:\n\n    color[node] = GRAY\n    stack.append(node)\n    for nxt in graph.get(node, []):\n        visit(nxt)   # color[nxt]==GRAY なら循環として記録\n    stack.pop()\n    color[node] = BLACK",
+      "citation": {
+        "file": "backend/src/integrity.py",
+        "symbol": {
+          "kind": "function",
+          "name": "_find_cycles"
+        },
+        "evidence_substring": "color[node] = GRAY",
+        "adr_ref": null,
+        "snippet": "color[node] = GRAY\nstack.append(node)\nfor nxt in graph.get(node, []):\n    visit(nxt)\nstack.pop()\ncolor[node] = BLACK  # GRAY=on current DFS path; revisiting GRAY means a cycle",
+        "source": "def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:\n    \"\"\"Simple DFS cycle detection. Returns a list of cycle paths.\"\"\"\n    WHITE, GRAY, BLACK = 0, 1, 2\n    color: dict[str, int] = defaultdict(int)\n    cycles: list[list[str]] = []\n    stack: list[str] = []\n\n    def visit(node: str) -> None:\n        if color[node] == GRAY:\n            # Found cycle: rewind stack until we find node again\n            idx = stack.index(node)\n            cycles.append(stack[idx:] + [node])\n            return\n        if color[node] == BLACK:\n            return\n        color[node] = GRAY\n        stack.append(node)\n        for nxt in graph.get(node, []):\n            visit(nxt)\n        stack.pop()\n        color[node] = BLACK\n\n    for n in list(graph.keys()):\n        if color[n] == WHITE:\n            visit(n)\n    return cycles",
+        "start_line": 50,
+        "end_line": 75
+      },
+      "answer": {
+        "model_answer": "DFSで探索中のノードをGRAY（現在のパス上）に塗り、子を辿ってGRAYに再訪したら循環として記録。探索が終わったらBLACKにして二度と見ない。",
+        "required_keywords": [
+          {
+            "any_of": [
+              "dfs",
+              "深さ優先",
+              "探索"
+            ]
+          },
+          {
+            "any_of": [
+              "循環",
+              "サイクル",
+              "cycle"
+            ]
+          },
+          {
+            "any_of": [
+              "訪問中",
+              "パス上",
+              "gray",
+              "再訪",
+              "戻って"
+            ]
+          }
+        ],
+        "forbidden_keywords": []
+      },
+      "grading": {
+        "min_keyword_coverage": 0.66
+      },
+      "explanation": "逆向き×アルゴリズム読解。GRAY=現在の探索パス、への再訪が循環の証拠、という核を言語化させる。"
+    },
+    {
+      "id": "q_cc_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "frontend/src/lib/chatClient.ts",
+      "tags": [
+        "frontend",
+        "conversational-rag"
+      ],
+      "prompt": "チャット画面をリロードしても会話が続くのはなぜ？",
+      "citation": {
+        "file": "frontend/src/lib/chatClient.ts",
+        "symbol": {
+          "kind": "module",
+          "name": "module header"
+        },
+        "evidence_substring": "keeps\n// the active session_id in localStorage",
+        "adr_ref": "ADR-022",
+        "snippet": "// Chat API client. Wraps /api/chat for the conversational RAG path and keeps\n// the active session_id in localStorage so reloading /chat preserves the conversation."
+      },
+      "answer": {
+        "options": [
+          "Cookieに全履歴を保存",
+          "session_id を localStorage に保持し、サーバ側ストアの履歴を同じセッションで引き続き使う",
+          "URLに履歴を埋め込む",
+          "リロードでは続かない"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "クライアントはIDだけ保持、履歴本体はサーバ側 ConversationStore（sqlite）。リロード→同じsession_idでPOST。"
+    },
+    {
+      "id": "q_cc_002",
+      "difficulty": "L2",
+      "type": "fill_blank",
+      "module": "frontend/src/lib/chatClient.ts",
+      "tags": [
+        "frontend"
+      ],
+      "prompt": "chatClient が session_id 保存に使う localStorage キーは？\n    const STORAGE_KEY = ____;",
+      "citation": {
+        "file": "frontend/src/lib/chatClient.ts",
+        "symbol": {
+          "kind": "const",
+          "name": "STORAGE_KEY"
+        },
+        "evidence_substring": "STORAGE_KEY = \"axis-chat-session-id\"",
+        "adr_ref": null,
+        "snippet": "const STORAGE_KEY = \"axis-chat-session-id\";",
+        "source": "const STORAGE_KEY = \"axis-chat-session-id\";\n\nexport interface ChatRequest {\n  question: string;\n  session_id?: string | null;\n  filters?: Record<string, string | number>;\n  top_k?: number;\n}\n\nexport interface ChatResponse {\n  session_id: string;\n  question: string;\n  rewritten_question: string | null;\n  answer: string;\n  cited_ids: string[];\n  sources: SearchResultPayload[];\n  is_dummy: boolean;\n  model: string | null;\n}\n\nexport async function postChat(body: ChatRequest): Promise<ChatResponse> {\n  const res = await fetch(`${API_BASE}/api/chat`, {\n    method: \"POST\",\n    headers: { \"Content-Type\": \"application/json\" },",
+        "start_line": 8,
+        "end_line": 31
+      },
+      "answer": {
+        "accepted": [
+          "axis-chat-session-id",
+          "\"axis-chat-session-id\""
+        ]
+      },
+      "grading": {
+        "casefold": true
+      },
+      "explanation": "axis-chat-session-id。明示リセットされるまで同じ会話を継続する。"
+    },
+    {
+      "id": "q_fbc_001",
+      "difficulty": "L1",
+      "type": "location",
+      "module": "frontend/src/lib/feedbackClient.ts",
+      "tags": [
+        "frontend",
+        "feedback"
+      ],
+      "prompt": "👍/👎 を /api/feedback に送るフロント関数は？（ファイルとシンボル）",
+      "citation": {
+        "file": "frontend/src/lib/feedbackClient.ts",
+        "symbol": {
+          "kind": "function",
+          "name": "postFeedback"
+        },
+        "evidence_substring": "export async function postFeedback",
+        "adr_ref": "ADR-028",
+        "snippet": "// spec_047: 👍 / 👎 feedback client. Posts to /api/feedback, mirroring schemas.py:FeedbackRequest.\nexport async function postFeedback(payload: FeedbackPayload): Promise<FeedbackResponse> { ... }",
+        "source": "export async function postFeedback(\n  payload: FeedbackPayload,\n): Promise<FeedbackResponse> {\n  const res = await fetch(`${API_BASE}/api/feedback`, {\n    method: \"POST\",\n    headers: { \"Content-Type\": \"application/json\" },\n    body: JSON.stringify(payload),\n  });\n  if (!res.ok) {\n    throw new Error(\n      `feedback POST failed: ${res.status} ${await res.text()}`,\n    );\n  }\n  return (await res.json()) as FeedbackResponse;\n}",
+        "start_line": 19,
+        "end_line": 33
+      },
+      "answer": {
+        "file": "frontend/src/lib/feedbackClient.ts",
+        "symbol": "postFeedback"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "postFeedback"
+        ],
+        "accept_file_only_partial": 0.6
+      },
+      "explanation": "spec_047 のフロント側。バックエンドの FeedbackStore に記録される。"
+    },
+    {
+      "id": "q_fbc_002",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "frontend/src/lib/feedbackClient.ts",
+      "tags": [
+        "frontend",
+        "feedback"
+      ],
+      "prompt": "FeedbackPayload の rating が取り得る値は？",
+      "citation": {
+        "file": "frontend/src/lib/feedbackClient.ts",
+        "symbol": {
+          "kind": "interface",
+          "name": "FeedbackPayload"
+        },
+        "evidence_substring": "rating: 1 | -1 | 0",
+        "adr_ref": null,
+        "snippet": "export interface FeedbackPayload {\n  query?: string | null;\n  doc_id?: string | null;\n  rating: 1 | -1 | 0;\n  session_id?: string | null;\n}"
+      },
+      "answer": {
+        "options": [
+          "0〜5 の星",
+          "1（👍）/ -1（👎）/ 0（取り消し）",
+          "true / false",
+          "任意の整数"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "リテラル型 1 | -1 | 0 で取り得る値を型レベルで固定。"
+    },
+    {
+      "id": "q_gs_001",
+      "difficulty": "L2",
+      "type": "location",
+      "module": "frontend/src/components/GraphSidebar.tsx",
+      "tags": [
+        "frontend",
+        "graphrag"
+      ],
+      "prompt": "3Dグラフでノードをクリックすると隣接docを出すサイドバーのコンポーネントは？（ファイルとシンボル）",
+      "citation": {
+        "file": "frontend/src/components/GraphSidebar.tsx",
+        "symbol": {
+          "kind": "component",
+          "name": "GraphSidebar"
+        },
+        "evidence_substring": "fetchNeighborsBidirectional",
+        "adr_ref": "ADR-032",
+        "snippet": "export function GraphSidebar({ docId, onClose }: Props) {\n  useEffect(() => { ... fetchNeighborsBidirectional(docId, 1, 20) ... }, [docId]);",
+        "source": "export function GraphSidebar({ docId, onClose }: Props) {\n  const [data, setData] = useState<NeighborSet | null>(null);\n  const [error, setError] = useState<string | null>(null);\n\n  useEffect(() => {\n    if (!docId) {\n      setData(null);\n      setError(null);\n      return;\n    }\n    setData(null);\n    setError(null);\n    let cancelled = false;\n    fetchNeighborsBidirectional(docId, 1, 20)\n      .then((res) => {\n        if (!cancelled) setData(res);\n      })\n      .catch((e) => {\n        if (!cancelled) setError(String(e));\n      });\n    return () => {\n      cancelled = true;\n    };\n  }, [docId]);",
+        "start_line": 12,
+        "end_line": 35
+      },
+      "answer": {
+        "file": "frontend/src/components/GraphSidebar.tsx",
+        "symbol": "GraphSidebar"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "GraphSidebar"
+        ],
+        "accept_file_only_partial": 0.7
+      },
+      "explanation": "docId を受けて双方向の隣接を取得・表示。レイアウト修正の経緯は ADR-032。"
+    },
+    {
+      "id": "q_gs_002",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "frontend/src/components/GraphSidebar.tsx",
+      "tags": [
+        "frontend",
+        "graphrag"
+      ],
+      "prompt": "fetchNeighborsBidirectional の『双方向（bidirectional）』が指すものは？",
+      "citation": {
+        "file": "frontend/src/components/GraphSidebar.tsx",
+        "symbol": {
+          "kind": "function",
+          "name": "fetchNeighborsBidirectional"
+        },
+        "evidence_substring": "fetchNeighborsBidirectional(docId, 1, 20)",
+        "adr_ref": "ADR-030",
+        "snippet": "fetchNeighborsBidirectional(docId, 1, 20)  // refsで参照している先(out)と、参照されている元(in)の両方の隣接を取得"
+      },
+      "answer": {
+        "options": [
+          "上下スクロールの両方向",
+          "その doc が参照している先（out）と、参照されている元（in）の両方の隣接",
+          "過去と未来のバージョン",
+          "日本語と英語"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "refs は有向だが、人間の関心は「繋がり全部」。out/in 両方向を出す（ADR-030 bidirectional refs）。"
+    },
+    {
+      "id": "q_oll_001",
+      "difficulty": "L2",
+      "type": "mcq",
+      "module": "backend/src/embedder.py",
+      "tags": [
+        "embedder",
+        "ollama"
+      ],
+      "prompt": "OllamaEmbedder の既定モデルと埋め込み次元は？",
+      "citation": {
+        "file": "backend/src/embedder.py",
+        "symbol": {
+          "kind": "class",
+          "name": "OllamaEmbedder"
+        },
+        "evidence_substring": "bge-m3``, 1024 dim",
+        "adr_ref": "ADR-026",
+        "snippet": "class OllamaEmbedder:\n    \"\"\"Ollama embedder backend (e.g. ``bge-m3``, 1024 dim).\"\"\"\n    DEFAULT_MODEL = \"bge-m3\"\n    DEFAULT_URL = \"http://localhost:11434\"",
+        "source": "class OllamaEmbedder:\n    \"\"\"Ollama embedder backend (e.g. ``bge-m3``, 1024 dim).\n\n    Talks to ``ollama`` via the official Python client. The package is\n    ``optional`` — install with ``pip install -e \".[ollama]\"``. If the\n    import / network call fails at construction, ``make_embedder()`` falls\n    back to ``DummyEmbedder`` and logs a warning.\n    \"\"\"\n\n    DEFAULT_MODEL = \"bge-m3\"\n    DEFAULT_URL = \"http://localhost:11434\"\n\n    def __init__(\n        self,\n        *,\n        model: str = DEFAULT_MODEL,\n        url: str = DEFAULT_URL,\n    ) -> None:\n        import ollama  # raises ImportError if optional extras not installed\n\n        self._client = ollama.Client(host=url)\n        self._model = model\n        self._url = url\n        # Probe once so we expose a stable ``dim`` for downstream code that\n        # relies on it (e.g. vector store dimensionality checks).\n        self._dim = self._probe_dim()\n\n    @property\n    def is_dummy(self) -> bool:\n        return False\n\n    @property\n    def dim(self) -> int:\n        return self._dim\n\n    @property\n    def model_name(self) -> str:\n        return self._model\n\n    def embed(self, text: str) -> list[float]:\n        resp = self._client.embeddings(model=self._model, prompt=text)\n        return list(resp[\"embedding\"])\n\n    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:\n        # Ollama embeddings endpoint is single-prompt; loop sequentially.\n        return [self.embed(t) for t in texts]\n\n    def _probe_dim(self) -> int:\n        resp = self._client.embeddings(model=self._model, prompt=\"probe\")\n        return len(resp[\"embedding\"])",
+        "start_line": 194,
+        "end_line": 243
+      },
+      "answer": {
+        "options": [
+          "text-embedding-3 / 1536",
+          "bge-m3 / 1024次元（URLは localhost:11434）",
+          "all-MiniLM / 384",
+          "Gemini embedding / 768"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "オンプレ経路の既定は bge-m3（1024次元）。Geminiの768と次元が違うため、起動時にプローブして整合を確認。"
+    },
+    {
+      "id": "q_oll_002",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "backend/src/embedder.py",
+      "tags": [
+        "embedder",
+        "ollama",
+        "design"
+      ],
+      "prompt": "ollama パッケージを optional 依存にし、構築失敗時に Dummy へフォールバックする設計の狙いは？",
+      "citation": {
+        "file": "backend/src/embedder.py",
+        "symbol": {
+          "kind": "class",
+          "name": "OllamaEmbedder"
+        },
+        "evidence_substring": "falls\n    back to ``DummyEmbedder``",
+        "adr_ref": "ADR-026",
+        "snippet": "The package is ``optional`` — install with ``pip install -e \".[ollama]\"``. If the\n    import / network call fails at construction, ``make_embedder()`` falls\n    back to ``DummyEmbedder`` and logs a warning.",
+        "source": "class OllamaEmbedder:\n    \"\"\"Ollama embedder backend (e.g. ``bge-m3``, 1024 dim).\n\n    Talks to ``ollama`` via the official Python client. The package is\n    ``optional`` — install with ``pip install -e \".[ollama]\"``. If the\n    import / network call fails at construction, ``make_embedder()`` falls\n    back to ``DummyEmbedder`` and logs a warning.\n    \"\"\"\n\n    DEFAULT_MODEL = \"bge-m3\"\n    DEFAULT_URL = \"http://localhost:11434\"\n\n    def __init__(\n        self,\n        *,\n        model: str = DEFAULT_MODEL,\n        url: str = DEFAULT_URL,\n    ) -> None:\n        import ollama  # raises ImportError if optional extras not installed\n\n        self._client = ollama.Client(host=url)\n        self._model = model\n        self._url = url\n        # Probe once so we expose a stable ``dim`` for downstream code that\n        # relies on it (e.g. vector store dimensionality checks).\n        self._dim = self._probe_dim()\n\n    @property\n    def is_dummy(self) -> bool:\n        return False\n\n    @property\n    def dim(self) -> int:\n        return self._dim\n\n    @property\n    def model_name(self) -> str:\n        return self._model\n\n    def embed(self, text: str) -> list[float]:\n        resp = self._client.embeddings(model=self._model, prompt=text)\n        return list(resp[\"embedding\"])\n\n    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:\n        # Ollama embeddings endpoint is single-prompt; loop sequentially.\n        return [self.embed(t) for t in texts]\n\n    def _probe_dim(self) -> int:\n        resp = self._client.embeddings(model=self._model, prompt=\"probe\")\n        return len(resp[\"embedding\"])",
+        "start_line": 194,
+        "end_line": 243
+      },
+      "answer": {
+        "options": [
+          "ライセンス上の制約",
+          "Ollamaを使わない人に依存を強制せず、未導入/停止中でもアプリ全体は起動し続けられるようにするため",
+          "速度向上",
+          "Windows非対応のため"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "optional extras + graceful fallback。オンプレ機能は使う人だけ、入れてない/落ちてる時も全体は動く。"
+    },
+    {
+      "id": "q_oll_003",
+      "difficulty": "L2",
+      "type": "location",
+      "module": "backend/src/embedder.py",
+      "tags": [
+        "embedder",
+        "ollama"
+      ],
+      "prompt": "OllamaEmbedder が起動時に一度だけ埋め込み次元を調べるメソッドは？（ファイルとシンボル）",
+      "citation": {
+        "file": "backend/src/embedder.py",
+        "symbol": {
+          "kind": "method",
+          "name": "OllamaEmbedder._probe_dim"
+        },
+        "evidence_substring": "self._dim = self._probe_dim()",
+        "adr_ref": null,
+        "snippet": "# Probe once so we expose a stable ``dim`` for downstream code that\n# relies on it (e.g. vector store dimensionality checks).\nself._dim = self._probe_dim()",
+        "source": "    def _probe_dim(self) -> int:\n        resp = self._client.embeddings(model=self._model, prompt=\"probe\")\n        return len(resp[\"embedding\"])",
+        "start_line": 241,
+        "end_line": 243
+      },
+      "answer": {
+        "file": "backend/src/embedder.py",
+        "symbol": "_probe_dim"
+      },
+      "grading": {
+        "symbol_aliases": [
+          "_probe_dim",
+          "probe_dim"
+        ],
+        "accept_file_only_partial": 0.5
+      },
+      "explanation": "モデルにより次元が違う（bge-m3=1024等）ので、1回埋め込んで実次元を確定させ、下流の次元チェックに使う。"
+    },
+    {
+      "id": "q_adr20_001",
+      "difficulty": "L4",
+      "type": "mcq",
+      "module": "docs/adr/ADR-020-citation-highlighting.md",
+      "tags": [
+        "citation",
+        "design"
+      ],
+      "prompt": "出典マーカーを doc ID（[doc_017]）からインライン [N]（1始まり）へ変えた理由は？（ADR-020）",
+      "citation": {
+        "file": "docs/adr/ADR-020-citation-highlighting.md",
+        "symbol": {
+          "kind": "section",
+          "name": "Context/Decision"
+        },
+        "evidence_substring": "Perplexity 風",
+        "adr_ref": "ADR-020",
+        "snippet": "doc ID は人間が見て直感的に「何番目の出典か」が分からない。ポートフォリオで Perplexity 風の \"クリックして対応する出典に飛ぶ\" 体験を最小コストで実現するため、回答テキストにインライン [N] マーカー (1-indexed) を埋め、UI 側でクリッカブル化する。"
+      },
+      "answer": {
+        "options": [
+          "doc IDが長すぎてトークンを消費するから",
+          "[N] なら人間が出典リストと直感的に対応づけられ、クリックで該当出典へ飛ぶPerplexity風UXを最小コストで作れるから",
+          "LLMがdoc IDを出力できないから",
+          "SEOのため"
+        ],
+        "correct_index": 1
+      },
+      "explanation": "「doc_017は何番目？」問題の解消。1-indexed の [N] は出典リストの並びと一致し、クリック動線が自然になる。"
+    },
+    {
+      "id": "q_adr20_002",
+      "difficulty": "L1",
+      "type": "fill_blank",
+      "module": "docs/adr/ADR-020-citation-highlighting.md",
+      "tags": [
+        "citation"
+      ],
+      "prompt": "インライン引用マーカー [N] の N は何始まり？（数字で）",
+      "citation": {
+        "file": "docs/adr/ADR-020-citation-highlighting.md",
+        "symbol": {
+          "kind": "section",
+          "name": "Decision"
+        },
+        "evidence_substring": "1-indexed",
+        "adr_ref": "ADR-020",
+        "snippet": "回答テキストにインライン [N] マーカー (1-indexed) を埋め、N は出典リストの index と一致させる。"
+      },
+      "answer": {
+        "accepted": [
+          "1",
+          "1始まり",
+          "1-indexed"
+        ]
+      },
+      "grading": {
+        "casefold": true
+      },
+      "explanation": "1始まり。0-indexedにしない＝人間の「1番目の出典」という感覚に合わせる。"
+    },
+    {
+      "id": "q_rev_006",
+      "difficulty": "L2",
+      "type": "freetext",
+      "module": "frontend/src/components/GraphSidebar.tsx",
+      "tags": [
+        "reverse",
+        "react"
+      ],
+      "prompt": "次の useEffect 内のパターンの目的を説明せよ:\n\n    let cancelled = false;\n    fetchNeighborsBidirectional(docId, 1, 20).then((d) => { if (!cancelled) setData(d); });\n    return () => { cancelled = true; };",
+      "citation": {
+        "file": "frontend/src/components/GraphSidebar.tsx",
+        "symbol": {
+          "kind": "component",
+          "name": "GraphSidebar"
+        },
+        "evidence_substring": "let cancelled = false",
+        "adr_ref": null,
+        "snippet": "let cancelled = false;\nfetchNeighborsBidirectional(docId, 1, 20).then((d) => { if (!cancelled) setData(d); });\nreturn () => { cancelled = true; };  // ignore stale async results after unmount / docId change",
+        "source": "export function GraphSidebar({ docId, onClose }: Props) {\n  const [data, setData] = useState<NeighborSet | null>(null);\n  const [error, setError] = useState<string | null>(null);\n\n  useEffect(() => {\n    if (!docId) {\n      setData(null);\n      setError(null);\n      return;\n    }\n    setData(null);\n    setError(null);\n    let cancelled = false;\n    fetchNeighborsBidirectional(docId, 1, 20)\n      .then((res) => {\n        if (!cancelled) setData(res);\n      })\n      .catch((e) => {\n        if (!cancelled) setError(String(e));\n      });\n    return () => {\n      cancelled = true;\n    };\n  }, [docId]);",
+        "start_line": 12,
+        "end_line": 35
+      },
+      "answer": {
+        "model_answer": "docIdが変わる/アンマウント後に届いた古い非同期結果を捨て、stale なデータで state を上書きする競合（race）を防ぐクリーンアップ。",
+        "required_keywords": [
+          {
+            "any_of": [
+              "古い",
+              "stale",
+              "前の",
+              "遅れて"
+            ]
+          },
+          {
+            "any_of": [
+              "無視",
+              "捨て",
+              "反映しない",
+              "上書きしない",
+              "キャンセル"
+            ]
+          },
+          {
+            "any_of": [
+              "非同期",
+              "fetch",
+              "結果",
+              "レース",
+              "race",
+              "競合",
+              "アンマウント"
+            ]
+          }
+        ],
+        "forbidden_keywords": []
+      },
+      "grading": {
+        "min_keyword_coverage": 0.66
+      },
+      "explanation": "逆向き×Reactイディオム。クリーンアップでフラグを立て、遅延して届いた結果のsetStateを抑止する定石。"
     }
   ]
 }
