@@ -1,0 +1,134 @@
+{
+  "batch": "04",
+  "modules": ["ingester.py", "ingest_web.py", "scripts/yamlize.py", "schemas.py", "config.py", "integrity.py"],
+  "questions": [
+    {
+      "id": "q_ing_001", "difficulty": "L2", "type": "mcq", "module": "backend/src/ingester.py", "tags": ["ingester"],
+      "prompt": "ingester.py の役割は？",
+      "citation": {"file": "backend/src/ingester.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "raw text → axis-knowledge-rag YAML frontmatter Markdown",
+        "adr_ref": null,
+        "snippet": "AI-powered ingester: raw text → axis-knowledge-rag YAML frontmatter Markdown.\nReuses the Claude API client pattern from rag.py."},
+      "answer": {"options": ["ベクトル索引の構築", "生テキストをAIで YAML frontmatter付きMarkdown に変換する", "APIの認証", "グラフ描画"], "correct_index": 1},
+      "explanation": "Slack抜粋・議事録などの生メモを、axis のナレッジ形式（YAML+Markdown）へAI変換する入口。"
+    },
+    {
+      "id": "q_ing_002", "difficulty": "L4", "type": "mcq", "module": "backend/src/ingester.py", "tags": ["ingester", "design"],
+      "prompt": "ANTHROPIC_API_KEY 未設定時の Ingester の挙動と、その設計意図は？",
+      "citation": {"file": "backend/src/ingester.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "falls back to a deterministic mock",
+        "adr_ref": null,
+        "snippet": "When ANTHROPIC_API_KEY is not set (or force_dummy=True), falls back to a deterministic mock so the CLI and tests run offline."},
+      "answer": {"options": ["例外を投げて停止する", "決定的なモックにフォールバックし、CLI/テストがオフラインで動くようにする", "Geminiに自動切替する", "空ファイルを出力する"], "correct_index": 1},
+      "explanation": "embedder の DUMMY と同じ思想：キー無しでも構造確認・CI が回る。決定的＝テストが安定。"
+    },
+    {
+      "id": "q_ing_003", "difficulty": "L1", "type": "location", "module": "backend/src/ingester.py", "tags": ["ingester"],
+      "prompt": "knowledge ディレクトリを見て次の doc ID を採番する関数は？（ファイルとシンボル）",
+      "citation": {"file": "backend/src/ingester.py", "symbol": {"kind": "function", "name": "_next_doc_id"},
+        "evidence_substring": "def _next_doc_id",
+        "adr_ref": null,
+        "snippet": "def _next_doc_id(knowledge_dir: Path) -> str:\n    # scan existing doc_NNN ids and return the next one"},
+      "answer": {"file": "backend/src/ingester.py", "symbol": "_next_doc_id"},
+      "grading": {"symbol_aliases": ["_next_doc_id", "next_doc_id"], "accept_file_only_partial": 0.5},
+      "explanation": "_scan_knowledge_dir / _existing_doc_ids と連携して doc_011 のような連番を払い出す。"
+    },
+    {
+      "id": "q_web_001", "difficulty": "L2", "type": "mcq", "module": "backend/src/ingest_web.py", "tags": ["browser-extension", "ingest"],
+      "prompt": "ingest_web.py（POST /api/ingest の裏側）は何をどう保存する？",
+      "citation": {"file": "backend/src/ingest_web.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "web_YYYYMMDD_HHMMSS",
+        "adr_ref": "ADR-027",
+        "snippet": "the browser extension sends URL + title + body (and optionally a user-selected snippet), and we persist a new examples/knowledge/web_YYYYMMDD_HHMMSS_<slug>.md file that the existing indexer can pick up untouched."},
+      "answer": {"options": ["DBに直接INSERTする", "拡張から来た URL+title+body を web_日時_<slug>.md として knowledge ディレクトリに保存する", "S3にアップロードする", "メモリにのみ保持"], "correct_index": 1},
+      "explanation": "ファイルとして置くだけで既存のインデクサがそのまま拾える、という疎結合な設計（spec_046）。"
+    },
+    {
+      "id": "q_web_002", "difficulty": "L1", "type": "location", "module": "backend/src/ingest_web.py", "tags": ["browser-extension"],
+      "prompt": "キャプチャしたWebページをYAML+Markdownとして書き出す本体関数は？（ファイルとシンボル）",
+      "citation": {"file": "backend/src/ingest_web.py", "symbol": {"kind": "function", "name": "save_web_page"},
+        "evidence_substring": "def save_web_page",
+        "adr_ref": "ADR-027",
+        "snippet": "def save_web_page(...):\n    # build frontmatter via _yaml_dump, slugify filename, write to knowledge dir"},
+      "answer": {"file": "backend/src/ingest_web.py", "symbol": "save_web_page"},
+      "grading": {"symbol_aliases": ["save_web_page"], "accept_file_only_partial": 0.5},
+      "explanation": "_slugify / _yaml_dump を使ってファイル名とfrontmatterを組み立てて保存する。"
+    },
+    {
+      "id": "q_yml_001", "difficulty": "L1", "type": "location", "module": "scripts/yamlize.py", "tags": ["cli", "ingester"],
+      "prompt": "生テキスト1ファイルをYAML付きMarkdownへ変換するCLI（python -m scripts.yamlize）の実装ファイルは？",
+      "citation": {"file": "scripts/yamlize.py", "symbol": {"kind": "function", "name": "main"},
+        "evidence_substring": "python -m scripts.yamlize",
+        "adr_ref": null,
+        "snippet": "CLI: convert a single raw text file to YAML-frontmatter Markdown.\nUsage: python -m scripts.yamlize input.txt --suggested-category 議事録"},
+      "answer": {"file": "scripts/yamlize.py", "symbol": "main"},
+      "grading": {"symbol_aliases": ["main", "yamlize"], "accept_file_only_partial": 0.7},
+      "explanation": "単発変換のCLI。バッチ版は scripts/yamlize_dir.py。中身は Ingester を呼ぶ薄いラッパ。"
+    },
+    {
+      "id": "q_sch_001", "difficulty": "L2", "type": "mcq", "module": "backend/src/schemas.py", "tags": ["api", "schema"],
+      "prompt": "backend/src/schemas.py の役割と、フロントエンドとの関係は？",
+      "citation": {"file": "backend/src/schemas.py", "symbol": {"kind": "module", "name": "module docstring"},
+        "evidence_substring": "Pydantic schemas for the FastAPI layer",
+        "adr_ref": null,
+        "snippet": "Pydantic schemas for the FastAPI layer.\nclass SearchRequest(BaseModel): ...\nclass SearchResponse(BaseModel): ...  # frontend/src/lib/api.ts mirrors these types"},
+      "answer": {"options": ["DBのテーブル定義", "FastAPI のリクエスト/レスポンス型（Pydantic）。frontend の api.ts がこれをミラーする", "CSSの型", "テストのfixture"], "correct_index": 1},
+      "explanation": "API境界の型を一元定義。フロントのTS型はこれを手動ミラーし、双方の契約を揃える。"
+    },
+    {
+      "id": "q_cfg_001", "difficulty": "L2", "type": "mcq", "module": "backend/src/config.py", "tags": ["config"],
+      "prompt": "config.py の設定はどう構成されている？",
+      "citation": {"file": "backend/src/config.py", "symbol": {"kind": "module", "name": "dataclasses"},
+        "evidence_substring": "@dataclass(frozen=True)",
+        "adr_ref": null,
+        "snippet": "@dataclass(frozen=True)\nclass ParentDocConfig: ...\n@dataclass(frozen=True)\nclass TimeDecayConfig: ...\n@dataclass(frozen=True)\nclass ChatConfig: ...\n@dataclass(frozen=True)\nclass GenerationConfig: ...  # 機能ごとの小さなconfigを AppConfig が束ねる"},
+      "answer": {"options": ["1つの巨大dict", "機能ごとの frozen dataclass（ParentDoc/TimeDecay/Chat/Generation等）を AppConfig が束ねる", "環境変数のみ", "XMLファイル"], "correct_index": 1},
+      "explanation": "config.yml を _build_app_config が機能別の不変dataclassに詰める。型安全＋意図しない書き換え防止。"
+    },
+    {
+      "id": "q_cfg_002", "difficulty": "L2", "type": "fill_blank", "module": "backend/src/config.py", "tags": ["config", "python"],
+      "prompt": "設定dataclassを不変（書き換え不可）にしているデコレータ引数の空欄を埋めよ:\n    @dataclass(____=True)",
+      "citation": {"file": "backend/src/config.py", "symbol": {"kind": "class", "name": "ParentDocConfig"},
+        "evidence_substring": "@dataclass(frozen=True)",
+        "adr_ref": null,
+        "snippet": "@dataclass(frozen=True)\nclass ParentDocConfig:"},
+      "answer": {"accepted": ["frozen"]},
+      "grading": {"casefold": true},
+      "explanation": "frozen=True で属性代入が例外に。設定が実行中に書き換わる事故を型レベルで防ぐ。"
+    },
+    {
+      "id": "q_integ_002", "difficulty": "L2", "type": "location", "module": "backend/src/integrity.py", "tags": ["integrity", "graph"],
+      "prompt": "refs の循環参照を検出する関数は？（ファイルとシンボル）",
+      "citation": {"file": "backend/src/integrity.py", "symbol": {"kind": "function", "name": "_find_cycles"},
+        "evidence_substring": "def _find_cycles",
+        "adr_ref": null,
+        "snippet": "def _find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:\n    \"\"\"Simple DFS cycle detection. Returns a list of cycle paths.\"\"\""},
+      "answer": {"file": "backend/src/integrity.py", "symbol": "_find_cycles"},
+      "grading": {"symbol_aliases": ["_find_cycles", "find_cycles"], "accept_file_only_partial": 0.5},
+      "explanation": "IntegrityChecker.check が refs グラフに対して呼ぶ。DFSベースの循環検出。"
+    },
+    {
+      "id": "q_integ_003", "difficulty": "L2", "type": "mcq", "module": "backend/src/integrity.py", "tags": ["integrity", "algorithm"],
+      "prompt": "_find_cycles が使っているアルゴリズムは？",
+      "citation": {"file": "backend/src/integrity.py", "symbol": {"kind": "function", "name": "_find_cycles"},
+        "evidence_substring": "WHITE, GRAY, BLACK = 0, 1, 2",
+        "adr_ref": null,
+        "snippet": "WHITE, GRAY, BLACK = 0, 1, 2\n# DFS: GRAY(訪問中)のノードに再訪したら循環。stackを巻き戻して循環パスを記録。"},
+      "answer": {"options": ["BFSで最短経路", "3色（WHITE/GRAY/BLACK）のDFS：訪問中(GRAY)ノードへの再訪＝循環", "Union-Find", "トポロジカルソートのみ"], "correct_index": 1},
+      "explanation": "古典的な3色DFS。GRAY=現在の探索パス上、そこに戻ってきたら循環としてパスを記録。"
+    },
+    {
+      "id": "q_rev_005", "difficulty": "L3", "type": "freetext", "module": "backend/src/integrity.py", "tags": ["reverse", "algorithm"],
+      "prompt": "次のコードが何をしているか、GRAY の意味に触れつつ説明せよ:\n\n    color[node] = GRAY\n    stack.append(node)\n    for nxt in graph.get(node, []):\n        visit(nxt)   # color[nxt]==GRAY なら循環として記録\n    stack.pop()\n    color[node] = BLACK",
+      "citation": {"file": "backend/src/integrity.py", "symbol": {"kind": "function", "name": "_find_cycles"},
+        "evidence_substring": "color[node] = GRAY",
+        "adr_ref": null,
+        "snippet": "color[node] = GRAY\nstack.append(node)\nfor nxt in graph.get(node, []):\n    visit(nxt)\nstack.pop()\ncolor[node] = BLACK  # GRAY=on current DFS path; revisiting GRAY means a cycle"},
+      "answer": {"model_answer": "DFSで探索中のノードをGRAY（現在のパス上）に塗り、子を辿ってGRAYに再訪したら循環として記録。探索が終わったらBLACKにして二度と見ない。",
+        "required_keywords": [{"any_of": ["dfs", "深さ優先", "探索"]}, {"any_of": ["循環", "サイクル", "cycle"]}, {"any_of": ["訪問中", "パス上", "gray", "再訪", "戻って"]}],
+        "forbidden_keywords": []},
+      "grading": {"min_keyword_coverage": 0.66},
+      "explanation": "逆向き×アルゴリズム読解。GRAY=現在の探索パス、への再訪が循環の証拠、という核を言語化させる。"
+    }
+  ]
+}
