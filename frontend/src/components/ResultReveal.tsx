@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { CitationView, GradeResult } from "@/lib/api";
+import type { CitationView, GradeResult } from "@/lib/quiz/types";
 import { findTerms } from "@/lib/glossary";
 
 function TermNotes({ text }: { text: string }) {
@@ -58,7 +58,7 @@ function CodeReveal({ citation }: { citation: CitationView }) {
       )}
       {!real && (
         <p className="mt-1 text-[11px] text-slate-400">
-          ※ 全文は {citation.file} を参照（axis リポジトリが隣接フォルダにあれば実コードを自動表示します）
+          ※ 全文は {citation.file} を参照
         </p>
       )}
     </div>

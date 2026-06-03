@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { QuestionView } from "@/lib/api";
+import type { QuestionView } from "@/lib/quiz/types";
 
 const DIFF_LABEL: Record<string, string> = {
   L1: "L1 場所当て",
@@ -31,9 +31,9 @@ export function QuestionCard({
       case "mcq":
         return choice;
       case "dataflow":
-        return text; // comma / arrow separated; backend splits + alias-maps
+        return text;
       default:
-        return text; // fill_blank, freetext
+        return text;
     }
   }
 

@@ -69,6 +69,27 @@ def validate(bank: dict) -> list[str]:
     return errors
 
 
+def _warn_resolved(bank: dict) -> list[str]:
+    """Soft checks for spec_001 citation embedding (non-fatal warnings)."""
+    warnings: list[str] = []
+    _NON_SYMBOL_KINDS = {"module", "section"}
+    for q in bank.get("questions", []):
+        qid = q.get("id", "<no-id>")
+        cit = q.get("citation", {})
+        sym = cit.get("symbol") or {}
+        kind = sym.get("kind") if isinstance(sym, dict) else None
+        file_rel = cit.get("file", "")
+        is_resolvable = (
+            file_rel
+            and file_rel.endswith((".py", ".ts", ".tsx", ".js"))
+            and kind not in _NON_SYMBOL_KINDS
+            and sym.get("name")
+        )
+        if is_resolvable and not cit.get("source"):
+            warnings.append(f"{qid}: resolvable citation lacks embedded source (run build_bank.py)")
+    return warnings
+
+
 def main() -> int:
     bank = json.loads(BANK.read_text(encoding="utf-8"))
     errors = validate(bank)
@@ -85,6 +106,18 @@ def main() -> int:
     print(f"OK: {n} questions valid.")
     print("  difficulty:", dict(diff))
     print("  type:", dict(typ))
+    # soft warnings for spec_001 source embedding
+    warns = _warn_resolved(bank)
+    if warns:
+        print(f"\nWarnings ({len(warns)} — not errors, fix by running scripts/build_bank.py):")
+        for w in warns[:5]:
+            print("  -", w)
+        if len(warns) > 5:
+            print(f"  ... and {len(warns) - 5} more")
+    else:
+        axis_commit = bank.get("meta", {}).get("axis_commit", "n/a")
+        resolved = sum(1 for q in bank["questions"] if q.get("citation", {}).get("source"))
+        print(f"  source embedding: {resolved}/{n} resolved (axis_commit={axis_commit})")
     return 0
 
 

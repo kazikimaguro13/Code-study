@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type Overview } from "@/lib/api";
+import type { Overview } from "@/lib/quiz/types";
 
 function Bar({ value, color }: { value: number; color: string }) {
   return (
@@ -16,11 +16,13 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.overview().then(setOv).catch((e) => setError(String(e)));
+    import("@/lib/quiz/engine")
+      .then(({ overview }) => setOv(overview()))
+      .catch((e) => setError(String(e)));
   }, []);
 
   if (error)
-    return <p className="text-sm text-red-700">バックエンドに接続できません（{error}）。</p>;
+    return <p className="text-sm text-red-700">エラーが発生しました（{error}）。</p>;
   if (!ov) return <p className="text-slate-500">読み込み中…</p>;
 
   const modules = Object.entries(ov.modules).sort((a, b) => a[1].mastery - b[1].mastery);

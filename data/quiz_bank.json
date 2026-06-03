@@ -9,7 +9,8 @@
       "L2": "役割・振る舞い",
       "L3": "データフロー",
       "L4": "設計意図"
-    }
+    },
+    "axis_commit": "0ec909d"
   },
   "questions": [
     {
@@ -30,7 +31,10 @@
         },
         "evidence_substring": "final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25",
         "adr_ref": null,
-        "snippet": "if use_bm25:\n    bm25_scores = self._bm25_index.score(query)\n    for r in results:\n        bm25 = bm25_scores.get(r.id, 0.0)\n        final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25"
+        "snippet": "if use_bm25:\n    bm25_scores = self._bm25_index.score(query)\n    for r in results:\n        bm25 = bm25_scores.get(r.id, 0.0)\n        final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25",
+        "source": "    def search(\n        self,\n        query: str | None,\n        *,\n        filters: dict[str, Any] | None = None,\n        top_k: int = 5,\n        bm25_weight: float = 0.5,\n        graph_expand: bool = False,\n        graph_hop: int = 1,\n        graph_max_neighbors: int = 10,\n    ) -> list[SearchResult]:\n        \"\"\"Hybrid search (axis + vector + optional BM25 fusion + optional graph expand).\n\n        Args:\n            query: Natural-language query. If None, axis-only search (top_k arbitrary).\n            filters: User-friendly axis filters (`{\"category\": \"技術記事\"}`).\n            top_k: Maximum results to return.\n            bm25_weight: Weight of the BM25 score in the weighted-sum fusion\n                with the vector cosine score. ``0.0`` falls back to the v0.5\n                vector-only behaviour, ``1.0`` ranks purely by BM25. Ignored\n                when no ``bm25_index`` is wired into the engine or when the\n                query is ``None``.\n            graph_expand: spec_040. If True and the engine has a graph\n                wired, merge 1-hop refs neighbours of the top 5 hits into\n                the result set with a 0.7× score decay relative to their\n                source.\n            graph_hop: BFS depth for graph expansion (default 1).\n            graph_max_neighbors: per-source neighbour cap.\n\n        Query / filters are normalized before being passed to Chroma so that\n        the index (which stores `axis_*_norm` keys) can match across writing\n        variants (全角/半角・カタカナ/ひらがな・大文字小文字).\n        \"\"\"\n        norm_filters = (\n            {k: self._normalizer(str(v)) for k, v in filters.items()}\n            if filters\n            else None\n        )\n        where = _build_where_norm(norm_filters or {})\n        use_bm25 = (\n            query is not None\n            and self._bm25_index is not None\n            and bm25_weight > 0.0\n        )\n\n        if self._parent_doc_enabled:\n            pd_results = self._search_parent_doc(\n                query, where=where, top_k=top_k, bm25_weight=bm25_weight\n            )\n            if graph_expand:\n                pd_results = self._expand_with_graph(\n                    pd_results, hop=graph_hop, max_neighbors=graph_max_neighbors\n                )\n            self._record_gap(query, pd_results)\n            return pd_results\n\n        if query is None:\n            # Axis-only path: use a zero embedding (Chroma will then sort by\n            # distance from zero, which is arbitrary — but we mostly care about\n            # the filter). top_k is bounded by collection size.\n            n = min(top_k, max(self._store.count(), 1))\n            embedding = [0.0] * self._embedder.dim\n        else:\n            q_norm = self._normalizer(query)\n            embedding = self._embedder.embed(q_norm)\n            # Over-fetch when fusing so BM25 can re-rank candidates that\n            # ranked just outside the original vector top_k.\n            n = max(top_k * 2, 20) if use_bm25 else top_k\n\n        raw = self._store.query(embedding=embedding, n_results=n, where=where)\n        results = _to_results(raw)\n\n        if use_bm25:\n            assert query is not None and self._bm25_index is not None\n            bm25_scores = self._bm25_index.score(query)\n            fused: list[SearchResult] = []\n            for r in results:\n                bm25 = bm25_scores.get(r.id, 0.0)\n                final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25\n                fused.append(\n                    SearchResult(\n                        id=r.id,\n                        title=r.title,\n                        score=final,\n                        axes=r.axes,\n                        body_snippet=r.body_snippet,\n                        path=r.path,\n                        refs=r.refs,\n                        metadata=r.metadata,\n                    )\n                )\n            fused.sort(key=lambda r: r.score, reverse=True)\n            results = fused[:top_k]\n\n        # spec_035: apply time-weighted decay after fusion (re-sort needed).\n        td = self._time_decay_config\n        if td is not None and td.enabled and td.weight > 0:\n            results = _apply_time_decay(results, td)\n            results.sort(key=lambda r: r.score, reverse=True)\n            results = results[:top_k]\n\n        # spec_040: graph expansion (post-decay). Adds 1-hop refs neighbours\n        # of the top hits with a 0.7× decay multiplier. Caller-opt-in only.\n        if graph_expand:\n            results = self._expand_with_graph(\n                results, hop=graph_hop, max_neighbors=graph_max_neighbors\n            )\n\n        logger.info(\n            \"search(query=%r, filters=%s, bm25_weight=%.2f, graph_expand=%s) -> %d results\",\n            query,\n            filters,\n            bm25_weight,\n            graph_expand,\n            len(results),\n        )\n        self._record_gap(query, results)\n        return results",
+        "start_line": 191,
+        "end_line": 308
       },
       "answer": {
         "file": "backend/src/search.py",
@@ -63,7 +67,10 @@
         },
         "evidence_substring": "bm25_weight * bm25",
         "adr_ref": null,
-        "snippet": "final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25"
+        "snippet": "final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25",
+        "source": "    def search(\n        self,\n        query: str | None,\n        *,\n        filters: dict[str, Any] | None = None,\n        top_k: int = 5,\n        bm25_weight: float = 0.5,\n        graph_expand: bool = False,\n        graph_hop: int = 1,\n        graph_max_neighbors: int = 10,\n    ) -> list[SearchResult]:\n        \"\"\"Hybrid search (axis + vector + optional BM25 fusion + optional graph expand).\n\n        Args:\n            query: Natural-language query. If None, axis-only search (top_k arbitrary).\n            filters: User-friendly axis filters (`{\"category\": \"技術記事\"}`).\n            top_k: Maximum results to return.\n            bm25_weight: Weight of the BM25 score in the weighted-sum fusion\n                with the vector cosine score. ``0.0`` falls back to the v0.5\n                vector-only behaviour, ``1.0`` ranks purely by BM25. Ignored\n                when no ``bm25_index`` is wired into the engine or when the\n                query is ``None``.\n            graph_expand: spec_040. If True and the engine has a graph\n                wired, merge 1-hop refs neighbours of the top 5 hits into\n                the result set with a 0.7× score decay relative to their\n                source.\n            graph_hop: BFS depth for graph expansion (default 1).\n            graph_max_neighbors: per-source neighbour cap.\n\n        Query / filters are normalized before being passed to Chroma so that\n        the index (which stores `axis_*_norm` keys) can match across writing\n        variants (全角/半角・カタカナ/ひらがな・大文字小文字).\n        \"\"\"\n        norm_filters = (\n            {k: self._normalizer(str(v)) for k, v in filters.items()}\n            if filters\n            else None\n        )\n        where = _build_where_norm(norm_filters or {})\n        use_bm25 = (\n            query is not None\n            and self._bm25_index is not None\n            and bm25_weight > 0.0\n        )\n\n        if self._parent_doc_enabled:\n            pd_results = self._search_parent_doc(\n                query, where=where, top_k=top_k, bm25_weight=bm25_weight\n            )\n            if graph_expand:\n                pd_results = self._expand_with_graph(\n                    pd_results, hop=graph_hop, max_neighbors=graph_max_neighbors\n                )\n            self._record_gap(query, pd_results)\n            return pd_results\n\n        if query is None:\n            # Axis-only path: use a zero embedding (Chroma will then sort by\n            # distance from zero, which is arbitrary — but we mostly care about\n            # the filter). top_k is bounded by collection size.\n            n = min(top_k, max(self._store.count(), 1))\n            embedding = [0.0] * self._embedder.dim\n        else:\n            q_norm = self._normalizer(query)\n            embedding = self._embedder.embed(q_norm)\n            # Over-fetch when fusing so BM25 can re-rank candidates that\n            # ranked just outside the original vector top_k.\n            n = max(top_k * 2, 20) if use_bm25 else top_k\n\n        raw = self._store.query(embedding=embedding, n_results=n, where=where)\n        results = _to_results(raw)\n\n        if use_bm25:\n            assert query is not None and self._bm25_index is not None\n            bm25_scores = self._bm25_index.score(query)\n            fused: list[SearchResult] = []\n            for r in results:\n                bm25 = bm25_scores.get(r.id, 0.0)\n                final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25\n                fused.append(\n                    SearchResult(\n                        id=r.id,\n                        title=r.title,\n                        score=final,\n                        axes=r.axes,\n                        body_snippet=r.body_snippet,\n                        path=r.path,\n                        refs=r.refs,\n                        metadata=r.metadata,\n                    )\n                )\n            fused.sort(key=lambda r: r.score, reverse=True)\n            results = fused[:top_k]\n\n        # spec_035: apply time-weighted decay after fusion (re-sort needed).\n        td = self._time_decay_config\n        if td is not None and td.enabled and td.weight > 0:\n            results = _apply_time_decay(results, td)\n            results.sort(key=lambda r: r.score, reverse=True)\n            results = results[:top_k]\n\n        # spec_040: graph expansion (post-decay). Adds 1-hop refs neighbours\n        # of the top hits with a 0.7× decay multiplier. Caller-opt-in only.\n        if graph_expand:\n            results = self._expand_with_graph(\n                results, hop=graph_hop, max_neighbors=graph_max_neighbors\n            )\n\n        logger.info(\n            \"search(query=%r, filters=%s, bm25_weight=%.2f, graph_expand=%s) -> %d results\",\n            query,\n            filters,\n            bm25_weight,\n            graph_expand,\n            len(results),\n        )\n        self._record_gap(query, results)\n        return results",
+        "start_line": 191,
+        "end_line": 308
       },
       "answer": {
         "accepted": [
@@ -92,7 +99,10 @@
         },
         "evidence_substring": "score = max(0.0, min(1.0, 1.0 - dist))",
         "adr_ref": null,
-        "snippet": "dist = distances[i] if distances else 0.0\n        score = max(0.0, min(1.0, 1.0 - dist))"
+        "snippet": "dist = distances[i] if distances else 0.0\n        score = max(0.0, min(1.0, 1.0 - dist))",
+        "source": "def _to_results(raw: dict[str, Any]) -> list[SearchResult]:\n    \"\"\"Convert Chroma query() output to SearchResult list.\"\"\"\n    ids = raw.get(\"ids\", [[]])[0]\n    distances = raw.get(\"distances\", [[]])[0]\n    metadatas = raw.get(\"metadatas\", [[]])[0]\n    documents = raw.get(\"documents\", [[]])[0]\n\n    out: list[SearchResult] = []\n    for i, doc_id in enumerate(ids):\n        md = metadatas[i] or {}\n        dist = distances[i] if distances else 0.0\n        score = max(0.0, min(1.0, 1.0 - dist))\n        axes = {\n            k.removeprefix(\"axis_\"): v\n            for k, v in md.items()\n            if k.startswith(\"axis_\") and not k.endswith(\"_norm\")\n        }\n        refs = [r for r in (md.get(\"refs\") or \"\").split(\",\") if r]\n        out.append(\n            SearchResult(\n                id=doc_id,\n                title=str(md.get(\"title\", \"\")),\n                score=score,\n                axes=axes,\n                body_snippet=_snippet(documents[i] if documents else \"\"),\n                path=str(md.get(\"path\", \"\")),\n                refs=refs,\n                metadata=dict(md),\n            )\n        )\n    return out",
+        "start_line": 87,
+        "end_line": 117
       },
       "answer": {
         "accepted": [
@@ -122,7 +132,10 @@
         },
         "evidence_substring": "reason=\"no_results\"",
         "adr_ref": null,
-        "snippet": "if not results:\n    self._gap_store.record(query=query, reason=\"no_results\", n_results=0)\ntop = float(results[0].score)\nif top < self._gap_low_score_threshold:\n    self._gap_store.record(query=query, reason=\"low_score\", ...)"
+        "snippet": "if not results:\n    self._gap_store.record(query=query, reason=\"no_results\", n_results=0)\ntop = float(results[0].score)\nif top < self._gap_low_score_threshold:\n    self._gap_store.record(query=query, reason=\"low_score\", ...)",
+        "source": "    def _record_gap(\n        self, query: str | None, results: list[SearchResult]\n    ) -> None:\n        \"\"\"Post-hoc hook: log when a search returned nothing useful.\n\n        Skipped when the engine wasn't built with a ``gap_store`` (which\n        is the case in tests + when ``gap.enabled=false``). Two events\n        get recorded: empty hit list → ``no_results``; non-empty but the\n        top score is below ``low_score_threshold`` → ``low_score``.\n        Axis-only queries (``query is None``) are skipped — those are\n        listing/filter calls, not knowledge questions.\n        \"\"\"\n        if self._gap_store is None or not query:\n            return\n        try:\n            if not results:\n                self._gap_store.record(\n                    query=query, reason=\"no_results\", n_results=0\n                )\n                return\n            top = float(results[0].score)\n            if top < self._gap_low_score_threshold:\n                self._gap_store.record(\n                    query=query,\n                    reason=\"low_score\",\n                    top_score=top,\n                    n_results=len(results),\n                )\n        except Exception as e:  # noqa: BLE001\n            # The gap path must never fail the search. Log + swallow.\n            logger.warning(\"gap store record failed: %s\", e)",
+        "start_line": 314,
+        "end_line": 344
       },
       "answer": {
         "model_answer": "検索が無結果またはスコアが低かった時にナレッジギャップとして記録するフック。",
@@ -176,7 +189,10 @@
         },
         "evidence_substring": "embedding = self._embedder.embed(q_norm)",
         "adr_ref": null,
-        "snippet": "q_norm = self._normalizer(query)\nembedding = self._embedder.embed(q_norm)\nraw = self._store.query(embedding=embedding, ...)\nbm25_scores = self._bm25_index.score(query)\n# fuse, then time decay"
+        "snippet": "q_norm = self._normalizer(query)\nembedding = self._embedder.embed(q_norm)\nraw = self._store.query(embedding=embedding, ...)\nbm25_scores = self._bm25_index.score(query)\n# fuse, then time decay",
+        "source": "    def search(\n        self,\n        query: str | None,\n        *,\n        filters: dict[str, Any] | None = None,\n        top_k: int = 5,\n        bm25_weight: float = 0.5,\n        graph_expand: bool = False,\n        graph_hop: int = 1,\n        graph_max_neighbors: int = 10,\n    ) -> list[SearchResult]:\n        \"\"\"Hybrid search (axis + vector + optional BM25 fusion + optional graph expand).\n\n        Args:\n            query: Natural-language query. If None, axis-only search (top_k arbitrary).\n            filters: User-friendly axis filters (`{\"category\": \"技術記事\"}`).\n            top_k: Maximum results to return.\n            bm25_weight: Weight of the BM25 score in the weighted-sum fusion\n                with the vector cosine score. ``0.0`` falls back to the v0.5\n                vector-only behaviour, ``1.0`` ranks purely by BM25. Ignored\n                when no ``bm25_index`` is wired into the engine or when the\n                query is ``None``.\n            graph_expand: spec_040. If True and the engine has a graph\n                wired, merge 1-hop refs neighbours of the top 5 hits into\n                the result set with a 0.7× score decay relative to their\n                source.\n            graph_hop: BFS depth for graph expansion (default 1).\n            graph_max_neighbors: per-source neighbour cap.\n\n        Query / filters are normalized before being passed to Chroma so that\n        the index (which stores `axis_*_norm` keys) can match across writing\n        variants (全角/半角・カタカナ/ひらがな・大文字小文字).\n        \"\"\"\n        norm_filters = (\n            {k: self._normalizer(str(v)) for k, v in filters.items()}\n            if filters\n            else None\n        )\n        where = _build_where_norm(norm_filters or {})\n        use_bm25 = (\n            query is not None\n            and self._bm25_index is not None\n            and bm25_weight > 0.0\n        )\n\n        if self._parent_doc_enabled:\n            pd_results = self._search_parent_doc(\n                query, where=where, top_k=top_k, bm25_weight=bm25_weight\n            )\n            if graph_expand:\n                pd_results = self._expand_with_graph(\n                    pd_results, hop=graph_hop, max_neighbors=graph_max_neighbors\n                )\n            self._record_gap(query, pd_results)\n            return pd_results\n\n        if query is None:\n            # Axis-only path: use a zero embedding (Chroma will then sort by\n            # distance from zero, which is arbitrary — but we mostly care about\n            # the filter). top_k is bounded by collection size.\n            n = min(top_k, max(self._store.count(), 1))\n            embedding = [0.0] * self._embedder.dim\n        else:\n            q_norm = self._normalizer(query)\n            embedding = self._embedder.embed(q_norm)\n            # Over-fetch when fusing so BM25 can re-rank candidates that\n            # ranked just outside the original vector top_k.\n            n = max(top_k * 2, 20) if use_bm25 else top_k\n\n        raw = self._store.query(embedding=embedding, n_results=n, where=where)\n        results = _to_results(raw)\n\n        if use_bm25:\n            assert query is not None and self._bm25_index is not None\n            bm25_scores = self._bm25_index.score(query)\n            fused: list[SearchResult] = []\n            for r in results:\n                bm25 = bm25_scores.get(r.id, 0.0)\n                final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25\n                fused.append(\n                    SearchResult(\n                        id=r.id,\n                        title=r.title,\n                        score=final,\n                        axes=r.axes,\n                        body_snippet=r.body_snippet,\n                        path=r.path,\n                        refs=r.refs,\n                        metadata=r.metadata,\n                    )\n                )\n            fused.sort(key=lambda r: r.score, reverse=True)\n            results = fused[:top_k]\n\n        # spec_035: apply time-weighted decay after fusion (re-sort needed).\n        td = self._time_decay_config\n        if td is not None and td.enabled and td.weight > 0:\n            results = _apply_time_decay(results, td)\n            results.sort(key=lambda r: r.score, reverse=True)\n            results = results[:top_k]\n\n        # spec_040: graph expansion (post-decay). Adds 1-hop refs neighbours\n        # of the top hits with a 0.7× decay multiplier. Caller-opt-in only.\n        if graph_expand:\n            results = self._expand_with_graph(\n                results, hop=graph_hop, max_neighbors=graph_max_neighbors\n            )\n\n        logger.info(\n            \"search(query=%r, filters=%s, bm25_weight=%.2f, graph_expand=%s) -> %d results\",\n            query,\n            filters,\n            bm25_weight,\n            graph_expand,\n            len(results),\n        )\n        self._record_gap(query, results)\n        return results",
+        "start_line": 191,
+        "end_line": 308
       },
       "answer": {
         "sequence": [
@@ -250,7 +266,10 @@
         },
         "evidence_substring": "falls back to the v0.5",
         "adr_ref": null,
-        "snippet": "bm25_weight: 0.0 falls back to the v0.5 vector-only behaviour, 1.0 ranks purely by BM25."
+        "snippet": "bm25_weight: 0.0 falls back to the v0.5 vector-only behaviour, 1.0 ranks purely by BM25.",
+        "source": "    def search(\n        self,\n        query: str | None,\n        *,\n        filters: dict[str, Any] | None = None,\n        top_k: int = 5,\n        bm25_weight: float = 0.5,\n        graph_expand: bool = False,\n        graph_hop: int = 1,\n        graph_max_neighbors: int = 10,\n    ) -> list[SearchResult]:\n        \"\"\"Hybrid search (axis + vector + optional BM25 fusion + optional graph expand).\n\n        Args:\n            query: Natural-language query. If None, axis-only search (top_k arbitrary).\n            filters: User-friendly axis filters (`{\"category\": \"技術記事\"}`).\n            top_k: Maximum results to return.\n            bm25_weight: Weight of the BM25 score in the weighted-sum fusion\n                with the vector cosine score. ``0.0`` falls back to the v0.5\n                vector-only behaviour, ``1.0`` ranks purely by BM25. Ignored\n                when no ``bm25_index`` is wired into the engine or when the\n                query is ``None``.\n            graph_expand: spec_040. If True and the engine has a graph\n                wired, merge 1-hop refs neighbours of the top 5 hits into\n                the result set with a 0.7× score decay relative to their\n                source.\n            graph_hop: BFS depth for graph expansion (default 1).\n            graph_max_neighbors: per-source neighbour cap.\n\n        Query / filters are normalized before being passed to Chroma so that\n        the index (which stores `axis_*_norm` keys) can match across writing\n        variants (全角/半角・カタカナ/ひらがな・大文字小文字).\n        \"\"\"\n        norm_filters = (\n            {k: self._normalizer(str(v)) for k, v in filters.items()}\n            if filters\n            else None\n        )\n        where = _build_where_norm(norm_filters or {})\n        use_bm25 = (\n            query is not None\n            and self._bm25_index is not None\n            and bm25_weight > 0.0\n        )\n\n        if self._parent_doc_enabled:\n            pd_results = self._search_parent_doc(\n                query, where=where, top_k=top_k, bm25_weight=bm25_weight\n            )\n            if graph_expand:\n                pd_results = self._expand_with_graph(\n                    pd_results, hop=graph_hop, max_neighbors=graph_max_neighbors\n                )\n            self._record_gap(query, pd_results)\n            return pd_results\n\n        if query is None:\n            # Axis-only path: use a zero embedding (Chroma will then sort by\n            # distance from zero, which is arbitrary — but we mostly care about\n            # the filter). top_k is bounded by collection size.\n            n = min(top_k, max(self._store.count(), 1))\n            embedding = [0.0] * self._embedder.dim\n        else:\n            q_norm = self._normalizer(query)\n            embedding = self._embedder.embed(q_norm)\n            # Over-fetch when fusing so BM25 can re-rank candidates that\n            # ranked just outside the original vector top_k.\n            n = max(top_k * 2, 20) if use_bm25 else top_k\n\n        raw = self._store.query(embedding=embedding, n_results=n, where=where)\n        results = _to_results(raw)\n\n        if use_bm25:\n            assert query is not None and self._bm25_index is not None\n            bm25_scores = self._bm25_index.score(query)\n            fused: list[SearchResult] = []\n            for r in results:\n                bm25 = bm25_scores.get(r.id, 0.0)\n                final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25\n                fused.append(\n                    SearchResult(\n                        id=r.id,\n                        title=r.title,\n                        score=final,\n                        axes=r.axes,\n                        body_snippet=r.body_snippet,\n                        path=r.path,\n                        refs=r.refs,\n                        metadata=r.metadata,\n                    )\n                )\n            fused.sort(key=lambda r: r.score, reverse=True)\n            results = fused[:top_k]\n\n        # spec_035: apply time-weighted decay after fusion (re-sort needed).\n        td = self._time_decay_config\n        if td is not None and td.enabled and td.weight > 0:\n            results = _apply_time_decay(results, td)\n            results.sort(key=lambda r: r.score, reverse=True)\n            results = results[:top_k]\n\n        # spec_040: graph expansion (post-decay). Adds 1-hop refs neighbours\n        # of the top hits with a 0.7× decay multiplier. Caller-opt-in only.\n        if graph_expand:\n            results = self._expand_with_graph(\n                results, hop=graph_hop, max_neighbors=graph_max_neighbors\n            )\n\n        logger.info(\n            \"search(query=%r, filters=%s, bm25_weight=%.2f, graph_expand=%s) -> %d results\",\n            query,\n            filters,\n            bm25_weight,\n            graph_expand,\n            len(results),\n        )\n        self._record_gap(query, results)\n        return results",
+        "start_line": 191,
+        "end_line": 308
       },
       "answer": {
         "options": [
@@ -281,7 +300,10 @@
         },
         "evidence_substring": "tokens.append(text[i : i + 2])",
         "adr_ref": null,
-        "snippet": "def _tokenize(text):\n    tokens.extend(text)  # n=1\n    for i in range(len(text)-1):\n        tokens.append(text[i : i + 2])  # n=2"
+        "snippet": "def _tokenize(text):\n    tokens.extend(text)  # n=1\n    for i in range(len(text)-1):\n        tokens.append(text[i : i + 2])  # n=2",
+        "source": "def _tokenize(text: str) -> list[str]:\n    \"\"\"Character n-gram tokenizer (n=1, 2) over already-normalized text.\n\n    Examples:\n        \"あいう\" -> [\"あ\", \"い\", \"う\", \"あい\", \"いう\"]\n    \"\"\"\n    if not text:\n        return []\n    tokens: list[str] = []\n    tokens.extend(text)  # n=1\n    for i in range(len(text) - 1):\n        tokens.append(text[i : i + 2])  # n=2\n    return tokens",
+        "start_line": 21,
+        "end_line": 33
       },
       "answer": {
         "file": "backend/src/bm25_index.py",
@@ -314,7 +336,10 @@
         },
         "evidence_substring": "avoids",
         "adr_ref": null,
-        "snippet": "character n-gram (n=1,2) on normalized text — avoids the morphological analyzer dependency while still usable for Japanese."
+        "snippet": "character n-gram (n=1,2) on normalized text — avoids the morphological analyzer dependency while still usable for Japanese.",
+        "source": "def _tokenize(text: str) -> list[str]:\n    \"\"\"Character n-gram tokenizer (n=1, 2) over already-normalized text.\n\n    Examples:\n        \"あいう\" -> [\"あ\", \"い\", \"う\", \"あい\", \"いう\"]\n    \"\"\"\n    if not text:\n        return []\n    tokens: list[str] = []\n    tokens.extend(text)  # n=1\n    for i in range(len(text) - 1):\n        tokens.append(text[i : i + 2])  # n=2\n    return tokens",
+        "start_line": 21,
+        "end_line": 33
       },
       "answer": {
         "options": [
@@ -345,7 +370,10 @@
         },
         "evidence_substring": "so they can be summed with cosine similarity",
         "adr_ref": null,
-        "snippet": "Raw BM25 scores are min-max normalized to [0,1] so they can be summed with cosine similarity.\nnorm_scores = (scores - s_min) / (s_max - s_min)"
+        "snippet": "Raw BM25 scores are min-max normalized to [0,1] so they can be summed with cosine similarity.\nnorm_scores = (scores - s_min) / (s_max - s_min)",
+        "source": "    def score(self, query: str) -> dict[str, float]:\n        \"\"\"Return `{doc_id: bm25_score}` for the query.\n\n        The query is normalized via `self.normalizer` then tokenized with\n        the same n-gram scheme as the corpus. Raw BM25 scores are min-max\n        normalized to `[0, 1]` so they can be summed with cosine similarity.\n        \"\"\"\n        q_tokens = _tokenize(self.normalizer(query))\n        if not q_tokens:\n            return {}\n        if not self.doc_ids:\n            return {}\n        scores = self._model.get_scores(q_tokens)\n        if not len(scores):\n            return {}\n        s_min = float(scores.min())\n        s_max = float(scores.max())\n        if s_max - s_min < 1e-9:\n            return {d: 0.0 for d in self.doc_ids}\n        norm_scores = (scores - s_min) / (s_max - s_min)\n        return {\n            d: float(s)\n            for d, s in zip(self.doc_ids, norm_scores, strict=True)\n        }",
+        "start_line": 61,
+        "end_line": 84
       },
       "answer": {
         "model_answer": "コサイン類似度(0〜1)と重み付き和で足せるようスケールを揃えるため。",
@@ -396,7 +424,10 @@
         },
         "evidence_substring": "model = BM25Okapi(tokenized)",
         "adr_ref": null,
-        "snippet": "from rank_bm25 import BM25Okapi\nmodel = BM25Okapi(tokenized)"
+        "snippet": "from rank_bm25 import BM25Okapi\nmodel = BM25Okapi(tokenized)",
+        "source": "    def build(\n        cls, docs: list[tuple[str, str]], normalizer: Normalizer\n    ) -> BM25Index:\n        \"\"\"Build from `(doc_id, normalized_body)` pairs.\n\n        The body should already be normalized (the same Normalizer that the\n        index uses for queries) so that tokens match consistently.\n        \"\"\"\n        ids = [d[0] for d in docs]\n        tokenized = [_tokenize(d[1]) for d in docs]\n        if not tokenized:\n            tokenized = [[\"\"]]  # rank_bm25 needs non-empty corpus\n        model = BM25Okapi(tokenized)\n        logger.info(\"BM25Index built (n_docs=%d)\", len(ids))\n        return cls(doc_ids=ids, normalizer=normalizer, _model=model)",
+        "start_line": 45,
+        "end_line": 59
       },
       "answer": {
         "accepted": [
@@ -426,7 +457,10 @@
         },
         "evidence_substring": "age_days / half_life_days",
         "adr_ref": null,
-        "snippet": "return math.exp(-math.log(2) * age_days / half_life_days)"
+        "snippet": "return math.exp(-math.log(2) * age_days / half_life_days)",
+        "source": "def decay_factor(\n    updated_at: Any,\n    *,\n    now: datetime | None = None,\n    half_life_days: float = 180.0,\n) -> float:\n    \"\"\"Return decay coefficient in (0.0, 1.0].\n\n    - decay = exp(-ln(2) * age_days / half_life_days)\n    - At age=half_life_days: 0.5; at age=2*half_life_days: 0.25\n    - updated_at = None / empty / unparseable → 1.0 (no penalty)\n    \"\"\"\n    if not updated_at:\n        return 1.0\n    now = now or datetime.now(UTC)\n    try:\n        dt = _parse_datetime(updated_at)\n    except Exception:  # noqa: BLE001\n        _log.warning(\"time_decay: failed to parse updated_at=%r, using 1.0\", updated_at)\n        return 1.0\n    age_seconds = (now - dt).total_seconds()\n    if age_seconds < 0:\n        return 1.0  # future-dated doc → no penalty\n    age_days = age_seconds / 86400.0\n    return math.exp(-math.log(2) * age_days / half_life_days)",
+        "start_line": 13,
+        "end_line": 37
       },
       "answer": {
         "accepted": [
@@ -455,7 +489,10 @@
         },
         "evidence_substring": "At age=half_life_days: 0.5",
         "adr_ref": null,
-        "snippet": "At age=half_life_days: 0.5; at age=2*half_life_days: 0.25"
+        "snippet": "At age=half_life_days: 0.5; at age=2*half_life_days: 0.25",
+        "source": "def decay_factor(\n    updated_at: Any,\n    *,\n    now: datetime | None = None,\n    half_life_days: float = 180.0,\n) -> float:\n    \"\"\"Return decay coefficient in (0.0, 1.0].\n\n    - decay = exp(-ln(2) * age_days / half_life_days)\n    - At age=half_life_days: 0.5; at age=2*half_life_days: 0.25\n    - updated_at = None / empty / unparseable → 1.0 (no penalty)\n    \"\"\"\n    if not updated_at:\n        return 1.0\n    now = now or datetime.now(UTC)\n    try:\n        dt = _parse_datetime(updated_at)\n    except Exception:  # noqa: BLE001\n        _log.warning(\"time_decay: failed to parse updated_at=%r, using 1.0\", updated_at)\n        return 1.0\n    age_seconds = (now - dt).total_seconds()\n    if age_seconds < 0:\n        return 1.0  # future-dated doc → no penalty\n    age_days = age_seconds / 86400.0\n    return math.exp(-math.log(2) * age_days / half_life_days)",
+        "start_line": 13,
+        "end_line": 37
       },
       "answer": {
         "options": [
@@ -485,7 +522,10 @@
         },
         "evidence_substring": "return base_score * (1.0 - w * (1.0 - decay))",
         "adr_ref": null,
-        "snippet": "def blend_score(base_score, decay, weight):\n    w = max(0.0, min(1.0, weight))\n    return base_score * (1.0 - w * (1.0 - decay))"
+        "snippet": "def blend_score(base_score, decay, weight):\n    w = max(0.0, min(1.0, weight))\n    return base_score * (1.0 - w * (1.0 - decay))",
+        "source": "def blend_score(base_score: float, decay: float, weight: float) -> float:\n    \"\"\"Blend base score with decay factor.\n\n    final = base * (1 - w) + (base * decay) * w\n          = base * (1 - w * (1 - decay))\n    \"\"\"\n    w = max(0.0, min(1.0, weight))\n    return base_score * (1.0 - w * (1.0 - decay))",
+        "start_line": 40,
+        "end_line": 47
       },
       "answer": {
         "file": "backend/src/_decay.py",
@@ -547,7 +587,10 @@
         },
         "evidence_substring": "unicodedata.normalize(\"NFKC\", s)",
         "adr_ref": null,
-        "snippet": "s = unicodedata.normalize(\"NFKC\", s)\ns = _katakana_to_hiragana(s)\ns = s.lower()"
+        "snippet": "s = unicodedata.normalize(\"NFKC\", s)\ns = _katakana_to_hiragana(s)\ns = s.lower()",
+        "source": "def normalize_text(text: str, options: NormalizerOptions | None = None) -> str:\n    opts = options or NormalizerOptions()\n    s = text\n    if opts.nfkc:\n        s = unicodedata.normalize(\"NFKC\", s)\n    if opts.katakana_to_hiragana:\n        s = _katakana_to_hiragana(s)\n    if opts.lowercase:\n        s = s.lower()\n    return s",
+        "start_line": 38,
+        "end_line": 47
       },
       "answer": {
         "model_answer": "NFKC正規化、カタカナ→ひらがな、小文字化。",
@@ -600,7 +643,10 @@
         },
         "evidence_substring": "cp - _KATAKANA_START + _HIRAGANA_START",
         "adr_ref": null,
-        "snippet": "if _KATAKANA_START <= cp <= _KATAKANA_END:\n    out.append(chr(cp - _KATAKANA_START + _HIRAGANA_START))"
+        "snippet": "if _KATAKANA_START <= cp <= _KATAKANA_END:\n    out.append(chr(cp - _KATAKANA_START + _HIRAGANA_START))",
+        "source": "def _katakana_to_hiragana(text: str) -> str:\n    out: list[str] = []\n    for ch in text:\n        cp = ord(ch)\n        if _KATAKANA_START <= cp <= _KATAKANA_END:\n            out.append(chr(cp - _KATAKANA_START + _HIRAGANA_START))\n        else:\n            out.append(ch)\n    return \"\".join(out)",
+        "start_line": 20,
+        "end_line": 28
       },
       "answer": {
         "file": "backend/src/normalizer.py",
@@ -693,7 +739,10 @@
         },
         "evidence_substring": "return f\"{doc_id}#{slug}\"",
         "adr_ref": null,
-        "snippet": "slug = _slugify(title)\nif not _is_strong_slug(slug):\n    slug = hashlib.md5(...).hexdigest()[:8]\nreturn f\"{doc_id}#{slug}\""
+        "snippet": "slug = _slugify(title)\nif not _is_strong_slug(slug):\n    slug = hashlib.md5(...).hexdigest()[:8]\nreturn f\"{doc_id}#{slug}\"",
+        "source": "def _make_parent_id(doc_id: str, title: str) -> str:\n    \"\"\"Deterministic ``{doc_id}#{slug}`` parent identifier.\n\n    The slug is ASCII-folded from the title; titles that fold to a \"weak\"\n    slug (empty, or numeric/symbol-only with no ASCII letters — e.g.\n    JP \"## 1. 目的\" → \"1\") fall back to an md5-hex prefix of the\n    NFKC-normalized title. This keeps the id stable across runs and\n    avoids parent_id collisions when two JP H2s share the same numeric\n    prefix (spec_055). ASCII-strong slugs like \"rag-patterns\" are kept\n    verbatim for backwards compatibility.\n    \"\"\"\n    slug = _slugify(title)\n    if not _is_strong_slug(slug):\n        normalized = unicodedata.normalize(\"NFKC\", title or \"\")\n        slug = hashlib.md5(normalized.encode(\"utf-8\")).hexdigest()[:8]\n    return f\"{doc_id}#{slug}\"",
+        "start_line": 320,
+        "end_line": 335
       },
       "answer": {
         "file": "backend/src/chunker.py",
@@ -726,7 +775,10 @@
         },
         "evidence_substring": "parent_id collisions",
         "adr_ref": null,
-        "snippet": "JP \"## 1. 目的\" → \"1\" weak slug. fall back to md5-hex to avoid parent_id collisions when two JP H2s share the same numeric prefix."
+        "snippet": "JP \"## 1. 目的\" → \"1\" weak slug. fall back to md5-hex to avoid parent_id collisions when two JP H2s share the same numeric prefix.",
+        "source": "def _make_parent_id(doc_id: str, title: str) -> str:\n    \"\"\"Deterministic ``{doc_id}#{slug}`` parent identifier.\n\n    The slug is ASCII-folded from the title; titles that fold to a \"weak\"\n    slug (empty, or numeric/symbol-only with no ASCII letters — e.g.\n    JP \"## 1. 目的\" → \"1\") fall back to an md5-hex prefix of the\n    NFKC-normalized title. This keeps the id stable across runs and\n    avoids parent_id collisions when two JP H2s share the same numeric\n    prefix (spec_055). ASCII-strong slugs like \"rag-patterns\" are kept\n    verbatim for backwards compatibility.\n    \"\"\"\n    slug = _slugify(title)\n    if not _is_strong_slug(slug):\n        normalized = unicodedata.normalize(\"NFKC\", title or \"\")\n        slug = hashlib.md5(normalized.encode(\"utf-8\")).hexdigest()[:8]\n    return f\"{doc_id}#{slug}\"",
+        "start_line": 320,
+        "end_line": 335
       },
       "answer": {
         "options": [
@@ -757,7 +809,10 @@
         },
         "evidence_substring": "at least one ASCII",
         "adr_ref": null,
-        "snippet": "A slug is \"strong\" iff it contains at least one ASCII [a-z] letter. Empty/numeric-only are weak."
+        "snippet": "A slug is \"strong\" iff it contains at least one ASCII [a-z] letter. Empty/numeric-only are weak.",
+        "source": "def _is_strong_slug(slug: str) -> bool:\n    \"\"\"A slug is \"strong\" iff it contains at least one ASCII [a-z] letter.\n\n    Empty slugs and numeric/symbol-only slugs (\"1\", \"3-1\", \"2-\") are weak\n    and must be replaced with a hash to avoid collisions across JP titles\n    that ASCII-fold to the same residue.\n    \"\"\"\n    if not slug:\n        return False\n    return bool(_ASCII_ALPHA_RE.search(slug))",
+        "start_line": 338,
+        "end_line": 347
       },
       "answer": {
         "model_answer": "slugが空でなくASCII英字[a-z]を1文字以上含むとき。",
@@ -835,7 +890,10 @@
         },
         "evidence_substring": "def delete_doc(self, doc_id",
         "adr_ref": null,
-        "snippet": "def delete_doc(self, doc_id: str) -> int:\n    # spec_056: chunk-level removal for idempotent re-ingest"
+        "snippet": "def delete_doc(self, doc_id: str) -> int:\n    # spec_056: chunk-level removal for idempotent re-ingest",
+        "source": "    def delete_doc(self, doc_id: str) -> int:\n        \"\"\"Remove every chunk + parent belonging to ``doc_id``. Returns deleted child count.\n\n        Used by the live-ingest path (spec_056) to make memo re-ingest behave\n        as upsert: re-chunking with the same ``doc_id`` produces deterministic\n        ``parent_id`` / ``child_id`` (v0.9.3, spec_055), so a plain ``add``\n        would trip Chroma's DuplicateIDError. We drop both sides — children\n        from the Chroma collection (matched on the ``doc_id`` metadata) and\n        parents from the SQLite sidecar — so the next ``add_chunks`` is a\n        clean insert. No-op on unknown ids; safe to call before every add.\n        \"\"\"\n        deleted = 0\n        try:\n            existing = self._collection.get(where={\"doc_id\": doc_id}, include=[])\n            ids = list(existing.get(\"ids\") or [])\n            if ids:\n                self._collection.delete(ids=ids)\n                deleted = len(ids)\n        except Exception as e:  # noqa: BLE001\n            logger.warning(\"delete_doc: chroma delete failed for %s: %s\", doc_id, e)\n        try:\n            removed_parents = self._parent_storage_delete_by_doc(doc_id)\n            if removed_parents:\n                self._parents = {\n                    pid: p for pid, p in self._parents.items() if p.doc_id != doc_id\n                }\n        except Exception as e:  # noqa: BLE001\n            logger.warning(\"delete_doc: parent storage delete failed for %s: %s\", doc_id, e)\n        return deleted",
+        "start_line": 242,
+        "end_line": 270
       },
       "answer": {
         "file": "backend/src/vector_store.py",
@@ -897,7 +955,10 @@
         },
         "evidence_substring": "nx.DiGraph",
         "adr_ref": "ADR-024",
-        "snippet": "def __init__(self, graph: nx.DiGraph): ...  # networkx>=3.0. source->target means source.refs contains target."
+        "snippet": "def __init__(self, graph: nx.DiGraph): ...  # networkx>=3.0. source->target means source.refs contains target.",
+        "source": "    def __init__(self, graph: nx.DiGraph) -> None:\n        self._g = graph\n        self._node_cache: dict[str, GraphNode] = {}",
+        "start_line": 48,
+        "end_line": 50
       },
       "answer": {
         "options": [
@@ -927,7 +988,10 @@
         },
         "evidence_substring": "def neighbors_within_hop",
         "adr_ref": null,
-        "snippet": "def neighbors_within_hop(self, doc_id, hop=1, max_neighbors=10):\n    # BFS over the DiGraph"
+        "snippet": "def neighbors_within_hop(self, doc_id, hop=1, max_neighbors=10):\n    # BFS over the DiGraph",
+        "source": "    def neighbors_within_hop(\n        self,\n        doc_id: str,\n        *,\n        hop: int = 1,\n        max_neighbors: int = 20,\n        direction: str = \"both\",\n    ) -> list[str]:\n        \"\"\"Return neighbour ids within ``hop`` BFS levels (deduplicated).\n\n        ``direction`` is one of ``\"out\"`` (successors only), ``\"in\"``\n        (predecessors only) or ``\"both\"`` (default; combines them).\n        Returns up to ``max_neighbors`` ids in BFS order; the search\n        center itself is never included.\n        \"\"\"\n        if hop < 1 or max_neighbors < 1:\n            return []\n        if doc_id not in self._g:\n            return []\n        visited: set[str] = {doc_id}\n        frontier: list[str] = [doc_id]\n        results: list[str] = []\n        for _ in range(hop):\n            next_frontier: list[str] = []\n            for node in frontier:\n                for n in self._collect_neighbors(node, direction):\n                    if n in visited:\n                        continue\n                    visited.add(n)\n                    results.append(n)\n                    next_frontier.append(n)\n                    if len(results) >= max_neighbors:\n                        return results\n            frontier = next_frontier\n            if not frontier:\n                break\n        return results",
+        "start_line": 105,
+        "end_line": 141
       },
       "answer": {
         "file": "backend/src/graph.py",
@@ -958,7 +1022,10 @@
         },
         "evidence_substring": "0.7",
         "adr_ref": "ADR-024",
-        "snippet": "merge 1-hop refs neighbours of the top 5 hits with a 0.7x score decay relative to their source."
+        "snippet": "merge 1-hop refs neighbours of the top 5 hits with a 0.7x score decay relative to their source.",
+        "source": "    def search(\n        self,\n        query: str | None,\n        *,\n        filters: dict[str, Any] | None = None,\n        top_k: int = 5,\n        bm25_weight: float = 0.5,\n        graph_expand: bool = False,\n        graph_hop: int = 1,\n        graph_max_neighbors: int = 10,\n    ) -> list[SearchResult]:\n        \"\"\"Hybrid search (axis + vector + optional BM25 fusion + optional graph expand).\n\n        Args:\n            query: Natural-language query. If None, axis-only search (top_k arbitrary).\n            filters: User-friendly axis filters (`{\"category\": \"技術記事\"}`).\n            top_k: Maximum results to return.\n            bm25_weight: Weight of the BM25 score in the weighted-sum fusion\n                with the vector cosine score. ``0.0`` falls back to the v0.5\n                vector-only behaviour, ``1.0`` ranks purely by BM25. Ignored\n                when no ``bm25_index`` is wired into the engine or when the\n                query is ``None``.\n            graph_expand: spec_040. If True and the engine has a graph\n                wired, merge 1-hop refs neighbours of the top 5 hits into\n                the result set with a 0.7× score decay relative to their\n                source.\n            graph_hop: BFS depth for graph expansion (default 1).\n            graph_max_neighbors: per-source neighbour cap.\n\n        Query / filters are normalized before being passed to Chroma so that\n        the index (which stores `axis_*_norm` keys) can match across writing\n        variants (全角/半角・カタカナ/ひらがな・大文字小文字).\n        \"\"\"\n        norm_filters = (\n            {k: self._normalizer(str(v)) for k, v in filters.items()}\n            if filters\n            else None\n        )\n        where = _build_where_norm(norm_filters or {})\n        use_bm25 = (\n            query is not None\n            and self._bm25_index is not None\n            and bm25_weight > 0.0\n        )\n\n        if self._parent_doc_enabled:\n            pd_results = self._search_parent_doc(\n                query, where=where, top_k=top_k, bm25_weight=bm25_weight\n            )\n            if graph_expand:\n                pd_results = self._expand_with_graph(\n                    pd_results, hop=graph_hop, max_neighbors=graph_max_neighbors\n                )\n            self._record_gap(query, pd_results)\n            return pd_results\n\n        if query is None:\n            # Axis-only path: use a zero embedding (Chroma will then sort by\n            # distance from zero, which is arbitrary — but we mostly care about\n            # the filter). top_k is bounded by collection size.\n            n = min(top_k, max(self._store.count(), 1))\n            embedding = [0.0] * self._embedder.dim\n        else:\n            q_norm = self._normalizer(query)\n            embedding = self._embedder.embed(q_norm)\n            # Over-fetch when fusing so BM25 can re-rank candidates that\n            # ranked just outside the original vector top_k.\n            n = max(top_k * 2, 20) if use_bm25 else top_k\n\n        raw = self._store.query(embedding=embedding, n_results=n, where=where)\n        results = _to_results(raw)\n\n        if use_bm25:\n            assert query is not None and self._bm25_index is not None\n            bm25_scores = self._bm25_index.score(query)\n            fused: list[SearchResult] = []\n            for r in results:\n                bm25 = bm25_scores.get(r.id, 0.0)\n                final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25\n                fused.append(\n                    SearchResult(\n                        id=r.id,\n                        title=r.title,\n                        score=final,\n                        axes=r.axes,\n                        body_snippet=r.body_snippet,\n                        path=r.path,\n                        refs=r.refs,\n                        metadata=r.metadata,\n                    )\n                )\n            fused.sort(key=lambda r: r.score, reverse=True)\n            results = fused[:top_k]\n\n        # spec_035: apply time-weighted decay after fusion (re-sort needed).\n        td = self._time_decay_config\n        if td is not None and td.enabled and td.weight > 0:\n            results = _apply_time_decay(results, td)\n            results.sort(key=lambda r: r.score, reverse=True)\n            results = results[:top_k]\n\n        # spec_040: graph expansion (post-decay). Adds 1-hop refs neighbours\n        # of the top hits with a 0.7× decay multiplier. Caller-opt-in only.\n        if graph_expand:\n            results = self._expand_with_graph(\n                results, hop=graph_hop, max_neighbors=graph_max_neighbors\n            )\n\n        logger.info(\n            \"search(query=%r, filters=%s, bm25_weight=%.2f, graph_expand=%s) -> %d results\",\n            query,\n            filters,\n            bm25_weight,\n            graph_expand,\n            len(results),\n        )\n        self._record_gap(query, results)\n        return results",
+        "start_line": 191,
+        "end_line": 308
       },
       "answer": {
         "accepted": [
@@ -1052,7 +1119,10 @@
         },
         "evidence_substring": "def make_embedder",
         "adr_ref": null,
-        "snippet": "def make_embedder(cfg=None) -> Embedder:\n    # picks Gemini/Ollama/Dummy based on config/keys"
+        "snippet": "def make_embedder(cfg=None) -> Embedder:\n    # picks Gemini/Ollama/Dummy based on config/keys",
+        "source": "def make_embedder(cfg: EmbedderConfig | None = None) -> Embedder:\n    \"\"\"Build an embedder backend from ``EmbedderConfig``.\n\n    - ``cfg is None`` → load defaults (``backend=\"gemini\"``).\n    - ``backend=\"gemini\"`` (default): Gemini API; auto-falls back to dummy\n      vectors when ``GEMINI_API_KEY`` is missing (v0.8.1 behaviour).\n    - ``backend=\"ollama\"``: spec_045 fully on-prem path. If the optional\n      ``ollama`` package is missing or the server is unreachable, logs a\n      warning and falls back to ``DummyEmbedder`` so app startup doesn't\n      block.\n    - ``backend=\"dummy\"``: force dummy vectors.\n    \"\"\"\n    if cfg is None:\n        from backend.src.config import EmbedderConfig as _EC\n\n        cfg = _EC()\n    backend = (cfg.backend or \"gemini\").lower()\n    if backend == \"ollama\":\n        try:\n            return OllamaEmbedder(model=cfg.ollama.model, url=cfg.ollama.url)\n        except Exception as e:  # noqa: BLE001 — never block startup\n            logger.warning(\n                \"Ollama embedder failed (%s), falling back to DummyEmbedder\", e\n            )\n            return DummyEmbedder()\n    if backend == \"dummy\":\n        return DummyEmbedder()\n    if backend != \"gemini\":\n        logger.warning(\"Unknown embedder backend %r, falling back to gemini\", backend)\n    return GeminiEmbedder()",
+        "start_line": 251,
+        "end_line": 280
       },
       "answer": {
         "file": "backend/src/embedder.py",
@@ -1115,7 +1185,10 @@
         },
         "evidence_substring": "def build_context",
         "adr_ref": "ADR-017",
-        "snippet": "def build_context(results, max_chars=8000):\n    # concatenate parent bodies, trimmed"
+        "snippet": "def build_context(results, max_chars=8000):\n    # concatenate parent bodies, trimmed",
+        "source": "def build_context(\n    results: list[SearchResult],\n    *,\n    max_chars: int = 8000,\n) -> str:\n    \"\"\"Concatenate parent (or doc) bodies with citation headers, capped by chars.\n\n    Uses ``body_full`` when populated (parent-doc mode) — that's the entire\n    H2 section text. Falls back to ``body_snippet`` otherwise, so the legacy\n    file-level path keeps working without changes. The hard ``max_chars``\n    budget protects the LLM context window — blocks beyond the budget are\n    dropped silently rather than truncated mid-sentence.\n    \"\"\"\n    out: list[str] = []\n    used = 0\n    for i, r in enumerate(results, 1):\n        body = r.body_full or r.body_snippet or \"\"\n        block = (\n            f\"## 出典 {i}: [{r.id}] {r.title}\\n\"\n            f\"(file: {r.path})\\n\"\n            f\"axes: {r.axes}\\n\\n\"\n            f\"{body}\\n\\n\"\n        )\n        if used + len(block) > max_chars:\n            break\n        out.append(block)\n        used += len(block)\n    return \"\".join(out)",
+        "start_line": 111,
+        "end_line": 138
       },
       "answer": {
         "file": "backend/src/rag.py",
@@ -1148,7 +1221,10 @@
         },
         "evidence_substring": "DEFAULT_MODEL = \"gemini-2.5-flash\"",
         "adr_ref": "ADR-031",
-        "snippet": "class GeminiBackend:\n    DEFAULT_MODEL = \"gemini-2.5-flash\""
+        "snippet": "class GeminiBackend:\n    DEFAULT_MODEL = \"gemini-2.5-flash\"",
+        "source": "class GeminiBackend:\n    \"\"\"Gemini chat backend (spec_052).\n\n    Reuses ``google-generativeai`` (already a hard dep for the embedder) so\n    deployments that have ``GEMINI_API_KEY`` set but lack\n    ``ANTHROPIC_API_KEY`` can still get a real generation step instead of\n    falling all the way to DUMMY. The factory wires this in automatically\n    via ``generation.backend=\"auto\"``.\n    \"\"\"\n\n    DEFAULT_MODEL = \"gemini-2.5-flash\"\n\n    def __init__(\n        self,\n        *,\n        model: str = DEFAULT_MODEL,\n        api_key: str | None = None,\n    ) -> None:\n        import google.generativeai as genai\n\n        self._api_key = api_key or settings.gemini_api_key or os.environ.get(\n            \"GEMINI_API_KEY\", \"\"\n        )\n        if not self._api_key:\n            raise RuntimeError(\"GEMINI_API_KEY not set for GeminiBackend\")\n        genai.configure(api_key=self._api_key)\n        self._model = model\n        self._client = genai.GenerativeModel(model)\n\n    @property\n    def model_name(self) -> str:\n        return self._model\n\n    @property\n    def is_dummy(self) -> bool:\n        return False\n\n    def generate(\n        self,\n        system: str,\n        messages: list[dict[str, str]],\n        *,\n        max_tokens: int = 1024,\n    ) -> str:\n        # Gemini has a ``system_instruction`` parameter, but encoding the\n        # system + roles into the prompt body keeps the call site\n        # provider-agnostic and avoids per-SDK-version drift in how\n        # ``system_instruction`` is consumed. Citation behaviour is identical.\n        parts: list[str] = []\n        if system:\n            parts.append(f\"[SYSTEM]\\n{system}\\n\\n\")\n        for m in messages:\n            role = (m.get(\"role\") or \"user\").upper()\n            content = m.get(\"content\", \"\")\n            parts.append(f\"[{role}]\\n{content}\\n\\n\")\n        prompt = \"\".join(parts).rstrip()\n\n        resp = self._client.generate_content(\n            prompt,\n            generation_config={\n                \"max_output_tokens\": max_tokens,\n                \"temperature\": 0.2,\n            },\n        )\n        return getattr(resp, \"text\", \"\") or \"\"",
+        "start_line": 250,
+        "end_line": 314
       },
       "answer": {
         "accepted": [
@@ -1241,7 +1317,10 @@
         },
         "evidence_substring": "build_context",
         "adr_ref": null,
-        "snippet": "results = self._engine.search(question)\ncontext = build_context(results)\ntext = self._call_generation(system, messages)\n# parse [N] citations -> cited_ids"
+        "snippet": "results = self._engine.search(question)\ncontext = build_context(results)\ntext = self._call_generation(system, messages)\n# parse [N] citations -> cited_ids",
+        "source": "    def answer(\n        self,\n        question: str,\n        *,\n        filters: dict[str, Any] | None = None,\n        top_k: int = 5,\n        max_tokens: int = 1024,\n    ) -> Answer:\n        results = self._engine.search(question, filters=filters, top_k=top_k)\n        if self._use_dummy:\n            ans = _dummy_answer(question, results)\n            self._record_llm_gap(question, ans.text, results)\n            return ans\n\n        # Prefer build_context() — uses full parent text in parent-doc mode,\n        # falls back to snippets in legacy mode. Same prompt either way.\n        if any(r.body_full for r in results):\n            context = build_context(results, max_chars=self._context_max_chars)\n        else:\n            context = _format_context(results)\n        user_msg = (\n            f\"# 質問\\n{question}\\n\\n\"\n            f\"# 提供された資料 (上位 {len(results)} 件)\\n\\n{context}\\n\\n\"\n            \"上記の資料のみを根拠に、出典マーク [N] (N は 1 始まり、上の 出典 i の i と一致) を付けて回答してください。\"\n        )\n        raw = self._call_generation(\n            system=SYSTEM_PROMPT,\n            messages=[{\"role\": \"user\", \"content\": user_msg}],\n            max_tokens=max_tokens,\n        )\n        text, used = parse_and_validate_citations(raw, n_sources=len(results))\n        cited_ids = [results[i].id for i in sorted(used)]\n        self._record_llm_gap(question, text, results)\n        return Answer(\n            text=text,\n            sources=results,\n            cited_ids=cited_ids,\n            is_dummy=False,\n            model=self._backend.model_name,\n        )",
+        "start_line": 547,
+        "end_line": 586
       },
       "answer": {
         "sequence": [
@@ -1335,7 +1414,10 @@
         },
         "evidence_substring": "async def axis_ingest_memo",
         "adr_ref": null,
-        "snippet": "async def axis_ingest_memo(params: IngestInput) -> str:\n    # spec_056: triggers live ingest via backend"
+        "snippet": "async def axis_ingest_memo(params: IngestInput) -> str:\n    # spec_056: triggers live ingest via backend",
+        "source": "async def axis_ingest_memo(params: IngestInput) -> str:\n    \"\"\"Convert a raw memo text into axis-knowledge-rag YAML-frontmatter Markdown.\n\n    Pipeline: read existing knowledge_dir → next doc_NNN id + existing ref list →\n    Claude fills axes/tags/title/body under strict axes_constraints from config.yml.\n    Returns rendered Markdown by default; pass `response_format='json'` for the\n    structured `IngestResult` payload plus the rendered Markdown.\n\n    spec_056: ``live_ingest=true`` (default) POSTs the rendered markdown to the\n    running backend's ``/api/ingest/memo`` so the memo becomes searchable + visible\n    in /api/graph without a backend restart. If the backend is not reachable,\n    the tool still returns the rendered markdown (``indexed=false``) so callers\n    can save it manually + run ``build_index --rebuild`` later.\n\n    DUMMY mode (no `ANTHROPIC_API_KEY`) returns a deterministic mock — useful\n    for plumbing tests but not for actual ingestion.\n    \"\"\"\n    try:\n        import os\n\n        from backend.src.ingester import Ingester, render_markdown\n        from backend.src.ingester_schemas import IngestOptions\n\n        ingester = Ingester()\n        opts = IngestOptions(\n            knowledge_dir=params.knowledge_dir,\n            suggested_category=params.suggested_category,\n            max_tokens=params.max_tokens,\n        )\n        result = ingester.ingest(params.raw_text, opts)\n        md = render_markdown(result)\n\n        live_resp: dict | None = None\n        if params.live_ingest:\n            backend_url = (\n                params.backend_url\n                or os.environ.get(\"AXIS_BACKEND_URL\", \"\").strip()\n                or _DEFAULT_BACKEND_URL\n            )\n            live_resp = _live_ingest_via_backend(md, backend_url)\n\n        if params.response_format == ResponseFormat.JSON:\n            payload = {\n                \"id\": result.id,\n                \"title\": result.title,\n                \"axes\": result.axes,\n                \"tags\": result.tags,\n                \"refs\": result.refs,\n                \"rendered_md\": md,\n                \"is_dummy\": ingester.is_dummy,\n                \"indexed\": bool(live_resp and live_resp.get(\"indexed\")),\n            }\n            if live_resp:\n                payload[\"live_ingest\"] = live_resp\n            return json.dumps(payload, ensure_ascii=False, indent=2)\n        if live_resp and live_resp.get(\"indexed\"):\n            return (\n                f\"<!-- indexed: {live_resp.get('parents', 0)} parents / \"\n                f\"{live_resp.get('children', 0)} children -->\\n{md}\"\n            )\n        return md\n    except Exception as e:\n        return make_error_response(\"axis_ingest_memo\", e)",
+        "start_line": 486,
+        "end_line": 548
       },
       "answer": {
         "file": "mcp_server/server.py",
@@ -1366,7 +1448,10 @@
         },
         "evidence_substring": "export const api =",
         "adr_ref": null,
-        "snippet": "export const api = {\n  axes: () => jsonFetch('/api/axes'),\n  search: (body) => jsonFetch('/api/search', {...}),\n};"
+        "snippet": "export const api = {\n  axes: () => jsonFetch('/api/axes'),\n  search: (body) => jsonFetch('/api/search', {...}),\n};",
+        "source": "export const api = {\n  health: () =>\n    jsonFetch<{ status: string; embedder_mode: string; rag_mode: string }>(\n      \"/api/health\",\n    ),\n  axes: () => jsonFetch<AxesResponse>(\"/api/axes\"),\n  search: (body: {\n    query?: string | null;\n    filters?: Record<string, string | number>;\n    top_k?: number;\n  }) =>\n    jsonFetch<SearchResponse>(\"/api/search\", {\n      method: \"POST\",\n      body: JSON.stringify(body),\n    }),\n  answer: (body: {\n    question: string;\n    filters?: Record<string, string | number>;\n    top_k?: number;\n    max_tokens?: number;\n  }) =>\n    jsonFetch<AnswerResponse>(\"/api/answer\", {\n      method: \"POST\",\n      body: JSON.stringify(body),",
+        "start_line": 52,
+        "end_line": 75
       },
       "answer": {
         "file": "frontend/src/lib/api.ts",
@@ -1399,7 +1484,10 @@
         },
         "evidence_substring": "code fences",
         "adr_ref": null,
-        "snippet": "Markers inside Markdown code fences or inline code spans are preserved as literal text (spec_039) — arr[1] in a code block is not a citation."
+        "snippet": "Markers inside Markdown code fences or inline code spans are preserved as literal text (spec_039) — arr[1] in a code block is not a citation.",
+        "source": "function buildSkipRanges(text: string): [number, number][] {\n  const ranges: [number, number][] = [];\n  RE_CODE_SPANS.lastIndex = 0;\n  let m: RegExpExecArray | null;\n  while ((m = RE_CODE_SPANS.exec(text)) !== null) {\n    ranges.push([m.index, m.index + m[0].length]);\n  }\n  return ranges;\n}\n\nfunction isInSkipRange(pos: number, ranges: [number, number][]): boolean {\n  for (const [s, e] of ranges) {\n    if (s <= pos && pos < e) return true;\n  }\n  return false;\n}\n\nexport function parseCitations(text: string): Segment[] {\n  const segments: Segment[] = [];\n  const skipRanges = buildSkipRanges(text);\n  let lastIndex = 0;\n  let m: RegExpExecArray | null;\n  RE_MARKER.lastIndex = 0;\n  while ((m = RE_MARKER.exec(text)) !== null) {",
+        "start_line": 26,
+        "end_line": 49
       },
       "answer": {
         "options": [
@@ -1430,7 +1518,10 @@
         },
         "evidence_substring": "http://localhost:8000",
         "adr_ref": null,
-        "snippet": "const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? \"http://localhost:8000\";"
+        "snippet": "const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? \"http://localhost:8000\";",
+        "source": "const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? \"http://localhost:8000\";\n\nexport interface AxisDef {\n  name: string;\n  type: string;\n  values?: string[];\n  required?: boolean;\n}\n\nexport interface AxesResponse {\n  axes: AxisDef[];\n}\n\nexport interface SearchResultPayload {\n  id: string;\n  title: string;\n  score: number;\n  axes: Record<string, string | number>;\n  body_snippet: string;\n  path: string;\n  refs: string[];\n}\n\nexport interface SearchResponse {",
+        "start_line": 3,
+        "end_line": 26
       },
       "answer": {
         "accepted": [
@@ -1571,7 +1662,10 @@
         },
         "evidence_substring": "fall back to the original question",
         "adr_ref": "ADR-018",
-        "snippet": "All failures (no API key, network error, quota, oversized output) fall back to the original question so chat UX never blocks."
+        "snippet": "All failures (no API key, network error, quota, oversized output) fall back to the original question so chat UX never blocks.",
+        "source": "def rewrite_question(\n    question: str,\n    history: list[Message],\n    *,\n    model_name: str = DEFAULT_MODEL,\n    enabled: bool = True,\n    backend: str = \"gemini\",\n    ollama_url: str = \"http://localhost:11434\",\n) -> str:\n    \"\"\"Rewrite ``question`` into a standalone query using chat history.\n\n    spec_045 added ``backend`` so the rewriter can run fully on-prem via\n    Ollama. ``backend=\"gemini\"`` (default) keeps v0.8.1 behaviour exactly.\n\n    Returns the original ``question`` unchanged when:\n    - ``enabled=False`` / ``history`` is empty / ``question`` is blank\n    - the chosen backend isn't configured (no GEMINI_API_KEY for gemini,\n      no ``ollama`` package / unreachable server for ollama)\n    - the model call raises\n    - the response is empty or >500 chars (likely a hallucination)\n    \"\"\"\n    if not enabled or not history or not question.strip():\n        return question\n    prompt = REWRITE_PROMPT.format(\n        history=_format_history(history),\n        question=question,\n    )\n    backend_l = (backend or \"gemini\").lower()\n    try:\n        if backend_l == \"ollama\":\n            rewritten = _rewrite_with_ollama(prompt, model_name, ollama_url)\n        else:\n            if not settings.gemini_api_key:\n                return question\n            rewritten = _rewrite_with_gemini(prompt, model_name)\n    except Exception as e:  # noqa: BLE001 — fall back on any failure\n        logger.warning(\"question rewriter failed, using original query: %s\", e)\n        return question\n\n    if not rewritten or len(rewritten) > MAX_REWRITE_LEN:\n        return question\n    rewritten = _clean_rewritten(rewritten)\n    return rewritten or question",
+        "start_line": 84,
+        "end_line": 126
       },
       "answer": {
         "options": [
@@ -1601,7 +1695,10 @@
         },
         "evidence_substring": "def parse_and_validate_citations",
         "adr_ref": null,
-        "snippet": "def parse_and_validate_citations(text, n_sources, ...):\n    # normalize [1,2]->[1][2], strip out-of-range, skip code spans"
+        "snippet": "def parse_and_validate_citations(text, n_sources, ...):\n    # normalize [1,2]->[1][2], strip out-of-range, skip code spans",
+        "source": "def parse_and_validate_citations(\n    text: str, *, n_sources: int\n) -> tuple[str, set[int]]:\n    \"\"\"Return (cleaned_text, set_of_used_source_indices_0based).\n\n    * Strips markers whose N is outside ``1..n_sources`` (logs a warning\n      so we can monitor LLM compliance over time).\n    * Canonicalises ``[1, 2]`` to ``[1][2]`` so the frontend parser only\n      has one shape to deal with.\n    * If every N in a marker is invalid, the marker is removed entirely.\n    * Markers that fall inside Markdown code fences / inline code are\n      preserved verbatim (treated as literal text, not citations).\n    \"\"\"\n    used: set[int] = set()\n    skip_ranges = _build_skip_ranges(text)\n\n    def _replace(m: re.Match[str]) -> str:\n        if _is_in_skip_range(m.start(), skip_ranges):\n            return m.group(0)\n        nums_str = m.group(1)\n        nums = [int(x.strip()) for x in nums_str.split(\",\")]\n        valid = [n for n in nums if 1 <= n <= n_sources]\n        invalid = [n for n in nums if n not in valid]\n        if invalid:\n            _log.warning(\n                \"citation out of range: %s (n_sources=%d)\", invalid, n_sources\n            )\n        if not valid:\n            return \"\"\n        used.update(n - 1 for n in valid)\n        return \"\".join(f\"[{n}]\" for n in valid)\n\n    cleaned = _RE_MARKER.sub(_replace, text)\n    return cleaned, used",
+        "start_line": 53,
+        "end_line": 86
       },
       "answer": {
         "file": "backend/src/_citations.py",
@@ -1664,7 +1761,10 @@
         },
         "evidence_substring": "def load_document",
         "adr_ref": null,
-        "snippet": "def load_document(path, normalizer=None) -> Document:\n    # parse YAML frontmatter + body via `frontmatter`"
+        "snippet": "def load_document(path, normalizer=None) -> Document:\n    # parse YAML frontmatter + body via `frontmatter`",
+        "source": "def load_document(path: Path, normalizer: Normalizer | None = None) -> Document:\n    \"\"\"Load a single Markdown file with YAML frontmatter.\n\n    If a Normalizer is provided, the `normalized_*` fields are populated.\n    Otherwise they remain empty (Day 1 behavior, kept for back-compat).\n    \"\"\"\n    if not path.exists():\n        raise LoaderError(f\"File not found: {path}\")\n    if not path.is_file():\n        raise LoaderError(f\"Not a file: {path}\")\n\n    try:\n        post = frontmatter.load(path)\n    except Exception as e:\n        raise LoaderError(f\"Failed to parse frontmatter for {path}: {e}\") from e\n\n    meta = post.metadata\n    if \"id\" not in meta:\n        raise LoaderError(f\"Missing required 'id' field in {path}\")\n    if \"title\" not in meta:\n        raise LoaderError(f\"Missing required 'title' field in {path}\")\n\n    doc = Document(\n        id=str(meta[\"id\"]),\n        title=str(meta[\"title\"]),\n        axes=dict(meta.get(\"axes\", {})),\n        tags=list(meta.get(\"tags\", [])),\n        refs=list(meta.get(\"refs\", [])),\n        body=post.content,\n        path=path,\n        raw_meta=dict(meta),\n    )\n    if normalizer is not None:\n        doc.normalized_title = normalizer(doc.title)\n        doc.normalized_body = normalizer(doc.body)\n        doc.normalized_axes = {k: normalizer(str(v)) for k, v in doc.axes.items()}\n        doc.normalized_tags = [normalizer(t) for t in doc.tags]\n    return doc",
+        "start_line": 57,
+        "end_line": 94
       },
       "answer": {
         "file": "backend/src/loader.py",
@@ -1758,7 +1858,10 @@
         },
         "evidence_substring": "Survives process restarts",
         "adr_ref": "ADR-022",
-        "snippet": "SqliteStore — file-backed sqlite3 (WAL mode), default for v0.8+. Survives process restarts and is safe across uvicorn workers."
+        "snippet": "SqliteStore — file-backed sqlite3 (WAL mode), default for v0.8+. Survives process restarts and is safe across uvicorn workers.",
+        "source": "class SqliteStore:\n    \"\"\"File-backed session store using stdlib ``sqlite3``.\n\n    Schema:\n        sessions(session_id TEXT PK, last_access REAL)\n        messages(id INTEGER PK AUTOINCREMENT, session_id TEXT FK,\n                 role TEXT, content TEXT, sources_json TEXT, timestamp REAL)\n        INDEX: messages(session_id, id)\n\n    - WAL journal mode enables concurrent reads while a writer holds the lock\n    - FOREIGN KEYS ensures DELETE FROM sessions also drops messages\n    - ``check_same_thread=False`` because FastAPI's threadpool dispatches\n      requests across threads; we guard mutations with our own ``Lock``.\n    \"\"\"\n\n    SCHEMA = \"\"\"\n    CREATE TABLE IF NOT EXISTS sessions (\n        session_id TEXT PRIMARY KEY,\n        last_access REAL NOT NULL\n    );\n    -- spec_042 MID #3: TTL eviction + LRU pick both scan by last_access;\n    -- without this index they become O(N) over the whole sessions table.\n    CREATE INDEX IF NOT EXISTS idx_sessions_last_access ON sessions(last_access);\n    CREATE TABLE IF NOT EXISTS messages (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        session_id TEXT NOT NULL,\n        role TEXT NOT NULL,\n        content TEXT NOT NULL,\n        sources_json TEXT,\n        timestamp REAL NOT NULL,\n        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE\n    );\n    CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id);\n    \"\"\"\n\n    def __init__(\n        self,\n        db_path: str = \"~/.axis_chat.db\",\n        *,\n        max_sessions: int = 1000,\n        ttl_seconds: int = 86400,\n    ) -> None:\n        self._db_path = os.path.expanduser(db_path)\n        # Ensure parent dir exists (so e.g. data/chat.db works on a fresh checkout).\n        parent = os.path.dirname(self._db_path)\n        if parent and not os.path.isdir(parent):\n            os.makedirs(parent, exist_ok=True)\n        self._max = max_sessions\n        self._ttl = ttl_seconds\n        self._conn: sqlite3.Connection | None = sqlite3.connect(\n            self._db_path, check_same_thread=False\n        )\n        self._conn.executescript(self.SCHEMA)\n        # WAL for concurrent reads; FK pragma is per-connection.\n        self._conn.execute(\"PRAGMA journal_mode=WAL\")\n        self._conn.execute(\"PRAGMA foreign_keys=ON\")\n        self._conn.commit()\n        self._lock = Lock()\n        # Purge any sessions already past TTL when we re-open the DB.\n        self._evict_expired_locked()\n\n    # ----- public API ----------------------------------------------------\n\n    def get_or_create(self, session_id: str | None = None) -> Session:\n        with self._lock:\n            self._evict_expired_locked()\n            now = _utcnow()\n            conn = self._require_conn()\n            if session_id:\n                row = conn.execute(\n                    \"SELECT last_access FROM sessions WHERE session_id = ?\",\n                    (session_id,),\n                ).fetchone()\n                if row is not None:\n                    conn.execute(\n                        \"UPDATE sessions SET last_access = ? WHERE session_id = ?\",\n                        (now.timestamp(), session_id),\n                    )\n                    conn.commit()\n                    return self._load_session_locked(session_id, now)\n            new_id = session_id or str(uuid.uuid4())\n            conn.execute(\n                \"INSERT INTO sessions (session_id, last_access) VALUES (?, ?)\",\n                (new_id, now.timestamp()),\n            )\n            conn.commit()\n            self._evict_lru_locked()\n            return Session(session_id=new_id, last_access=now)\n\n    def append(self, session_id: str, msg: Message) -> None:\n        with self._lock:\n            conn = self._require_conn()\n            now = _utcnow()\n            # \"append on unknown id\" → silently create the parent row so the\n            # FK doesn't blow up. Mirrors MemoryStore behaviour.\n            row = conn.execute(\n                \"SELECT session_id FROM sessions WHERE session_id = ?\",\n                (session_id,),\n            ).fetchone()\n            if row is None:\n                conn.execute(\n                    \"INSERT INTO sessions (session_id, last_access) VALUES (?, ?)\",\n                    (session_id, now.timestamp()),\n                )\n                self._evict_lru_locked()\n            conn.execute(\n                \"INSERT INTO messages \"\n                \"(session_id, role, content, sources_json, timestamp) \"\n                \"VALUES (?, ?, ?, ?, ?)\",\n                (\n                    session_id,\n                    msg.role,\n                    msg.content,\n                    json.dumps(msg.sources, ensure_ascii=False),\n                    msg.timestamp.timestamp(),\n                ),\n            )\n            conn.execute(\n                \"UPDATE sessions SET last_access = ? WHERE session_id = ?\",\n                (now.timestamp(), session_id),\n            )\n            conn.commit()\n\n    def get_history(\n        self, session_id: str, *, last_n_turns: int = 6\n    ) -> list[Message]:\n        with self._lock:\n            conn = self._require_conn()\n            # Confirm the session exists — unknown id returns [] like MemoryStore.\n            row = conn.execute(\n                \"SELECT 1 FROM sessions WHERE session_id = ?\",\n                (session_id,),\n            ).fetchone()\n            if row is None:\n                return []\n            limit = max(0, last_n_turns) * 2\n            if limit == 0:\n                return []\n            rows = conn.execute(\n                \"SELECT role, content, sources_json, timestamp FROM messages \"\n                \"WHERE session_id = ? ORDER BY id DESC LIMIT ?\",\n                (session_id, limit),\n            ).fetchall()\n        # ORDER BY DESC LIMIT N gives the newest N rows; reverse to chronological.\n        return [self._row_to_msg(r) for r in reversed(rows)]\n\n    def delete(self, session_id: str) -> bool:\n        with self._lock:\n            conn = self._require_conn()\n            cur = conn.execute(\n                \"DELETE FROM sessions WHERE session_id = ?\", (session_id,)\n            )\n            conn.commit()\n            return cur.rowcount > 0\n\n    def has(self, session_id: str) -> bool:\n        with self._lock:\n            conn = self._require_conn()\n            row = conn.execute(\n                \"SELECT 1 FROM sessions WHERE session_id = ?\", (session_id,)\n            ).fetchone()\n            return row is not None\n\n    def __len__(self) -> int:\n        with self._lock:\n            conn = self._require_conn()\n            return int(conn.execute(\"SELECT COUNT(*) FROM sessions\").fetchone()[0])\n\n    def close(self) -> None:\n        with self._lock:\n            if self._conn is not None:\n                try:\n                    self._conn.close()\n                finally:\n                    self._conn = None\n\n    # ----- internals -----------------------------------------------------\n\n    def _require_conn(self) -> sqlite3.Connection:\n        if self._conn is None:\n            raise RuntimeError(\"SqliteStore connection is already closed\")\n        return self._conn\n\n    def _load_session_locked(self, session_id: str, last_access: datetime) -> Session:\n        conn = self._require_conn()\n        rows = conn.execute(\n            \"SELECT role, content, sources_json, timestamp FROM messages \"\n            \"WHERE session_id = ? ORDER BY id ASC\",\n            (session_id,),\n        ).fetchall()\n        msgs = [self._row_to_msg(r) for r in rows]\n        return Session(session_id=session_id, messages=msgs, last_access=last_access)\n\n    @staticmethod\n    def _row_to_msg(row: tuple[Any, ...]) -> Message:\n        role, content, sources_json, ts = row\n        sources = json.loads(sources_json) if sources_json else []\n        return Message(\n            role=role,\n            content=content,\n            sources=sources,\n            timestamp=datetime.fromtimestamp(ts, tz=UTC),\n        )\n\n    def _evict_expired_locked(self) -> None:\n        conn = self._require_conn()\n        cutoff = (_utcnow() - timedelta(seconds=self._ttl)).timestamp()\n        conn.execute(\"DELETE FROM sessions WHERE last_access < ?\", (cutoff,))\n        conn.commit()\n\n    def _evict_lru_locked(self) -> None:\n        conn = self._require_conn()\n        count = int(conn.execute(\"SELECT COUNT(*) FROM sessions\").fetchone()[0])\n        excess = count - self._max\n        if excess <= 0:\n            return\n        conn.execute(\n            \"DELETE FROM sessions WHERE session_id IN \"\n            \"(SELECT session_id FROM sessions ORDER BY last_access ASC LIMIT ?)\",\n            (excess,),\n        )\n        conn.commit()",
+        "start_line": 177,
+        "end_line": 398
       },
       "answer": {
         "options": [

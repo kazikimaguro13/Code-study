@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, type GradeResult, type QuestionView } from "@/lib/api";
+import type { GradeResult, QuestionView } from "@/lib/quiz/types";
 import { QuestionCard } from "./QuestionCard";
 import { ResultReveal } from "./ResultReveal";
 
@@ -17,7 +17,8 @@ export function QuizRunner({ title, sessionSize = 8 }: { title: string; sessionS
     setLoading(true);
     setError(null);
     try {
-      const r = await api.next(sessionSize);
+      const { nextQuestions } = await import("@/lib/quiz/engine");
+      const r = nextQuestions(sessionSize);
       setQueue(r.questions);
       setIdx(0);
       setResult(null);
@@ -36,7 +37,8 @@ export function QuizRunner({ title, sessionSize = 8 }: { title: string; sessionS
     const q = queue[idx];
     if (!q) return;
     try {
-      const r = await api.grade(q.id, answer);
+      const { grade } = await import("@/lib/quiz/engine");
+      const r = grade(q.id, answer);
       setResult(r);
       setDone((d) => d + 1);
     } catch (e) {
@@ -54,8 +56,7 @@ export function QuizRunner({ title, sessionSize = 8 }: { title: string; sessionS
   if (error)
     return (
       <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">
-        バックエンドに接続できません（{error}）。FastAPI を起動してください:
-        <pre className="mt-2 text-xs">uvicorn backend.src.main:app --reload</pre>
+        エラーが発生しました: {error}
       </div>
     );
   if (queue.length === 0) return <p className="text-slate-500">出題できる問題がありません。</p>;

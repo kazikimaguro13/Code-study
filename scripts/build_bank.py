@@ -1,9 +1,16 @@
 from __future__ import annotations
 import json
+import subprocess
+import sys
 from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
 REPO = "axis-knowledge-rag"
 REPO_COMMIT = "0ec909d"
-OUT = Path(__file__).resolve().parents[1] / "data" / "quiz_bank.json"
+AXIS_REPO = Path.home() / "projects" / "axis-knowledge-rag"
+OUT = _ROOT / "data" / "quiz_bank.json"
 Q: list[dict] = []
 def add(**kw): Q.append(kw)
 def loc(file, sym, aliases=None, partial=0.5):
@@ -407,8 +414,59 @@ add(id="q_conv_002", difficulty="L4", type="mcq", module="backend/src/conversati
     answer={"options":["メモリより高速","再起動後も履歴が残り複数uvicorn worker間で安全","Redis廃止","暗号化"],"correct_index":1},
     explanation="WALのsqlite3で永続化＆マルチワーカー安全。Memoryは揮発・単一プロセス向け。")
 
-data = {"meta":{"repo":REPO,"repo_commit":REPO_COMMIT,"generator":"claude (cowork chat)","schema_version":1,
-  "difficulty_levels":{"L1":"場所当て","L2":"役割・振る舞い","L3":"データフロー","L4":"設計意図"}},"questions":Q}
+
+def _get_axis_commit() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=AXIS_REPO, text=True
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _embed_sources() -> int:
+    """Embed real source code into each citation that points at a resolvable symbol.
+
+    Returns the number of citations successfully resolved.
+    """
+    try:
+        from backend.src.anchor.resolver import resolve_citation as _rc
+    except ImportError as exc:
+        print(f"Warning: cannot import resolver ({exc}), skipping source embedding")
+        return 0
+
+    resolved = 0
+    for q in Q:
+        cit = q.get("citation", {})
+        if not cit:
+            continue
+        try:
+            result = _rc(AXIS_REPO, cit)
+            if result.get("found"):
+                cit["source"] = result["source"]
+                cit["start_line"] = result["start"]
+                cit["end_line"] = result["end"]
+                resolved += 1
+        except Exception:
+            pass
+    return resolved
+
+
+resolved_count = _embed_sources()
+axis_commit = _get_axis_commit()
+print(f"source embedding: {resolved_count}/{len(Q)} citations resolved (axis HEAD={axis_commit})")
+
+data = {
+    "meta": {
+        "repo": REPO,
+        "repo_commit": REPO_COMMIT,
+        "generator": "claude (cowork chat)",
+        "schema_version": 1,
+        "difficulty_levels": {"L1": "場所当て", "L2": "役割・振る舞い", "L3": "データフロー", "L4": "設計意図"},
+        "axis_commit": axis_commit,
+    },
+    "questions": Q,
+}
 OUT.parent.mkdir(parents=True, exist_ok=True)
 OUT.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print(f"wrote {len(Q)} questions -> {OUT}")
